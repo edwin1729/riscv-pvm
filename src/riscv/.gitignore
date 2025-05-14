@@ -3,3 +3,5 @@
 /*.svg
 /parse-benchmark
 /*.run
+/assets/revm-inbox.json
+/assets/revm-kernel.elf*
