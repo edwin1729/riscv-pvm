@@ -53,7 +53,7 @@ pub fn handle_generate_script(
 }
 
 fn generate_inbox(rollup_addr: &str, transfers: usize) -> Result<InboxFile> {
-    let messages = create_operations()?
+    let messages = create_operations(transfers)?
         .into_iter()
         .enumerate()
         .map(|(i, tx)| generate_message(rollup_addr, tx, i))
@@ -91,7 +91,7 @@ fn generate_message(rollup_addr: &str, tx: TxEnv, i: usize) -> Result<Message> {
 /// 2. Mint 100 coins to Alice from the owner address (0x1)
 /// 3. Alice sends 100 coins to Bob
 /// 4. Alice's balance gets queried
-fn create_operations() -> Result<Vec<TxEnv>> {
+fn create_operations(transfers: usize) -> Result<Vec<TxEnv>> {
     let mut operations = Vec::new();
 
     // deploy the contract
@@ -103,8 +103,15 @@ fn create_operations() -> Result<Vec<TxEnv>> {
         ..TxEnv::default()
     });
 
-    // mint coins for ALICE
+    let len = accounts_for_transfers(transfers);
+    let addrs: Vec<Address> = (0..len)
+        .into_iter()
+        .map(|i| Address::left_padding_from(&usize::to_be_bytes(i)))
+        .collect();
 
+    // Mint coins for everyone
+
+    let mut nonce = 0; // nonce for minting
     // Generate abi for the function we want to call from the contract
     // Solidity source code from https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.3.0/contracts/token/ERC20/IERC20.sol
     // and my extension of it `GLDToken.sol`
@@ -112,23 +119,27 @@ fn create_operations() -> Result<Vec<TxEnv>> {
         function mint(address to, uint256 amount) public onlyOwner;
     }
 
-    let mint_to_alice = mintCall {
-        to: ALICE,
-        amount: U256::from(100),
+    let amount = len + 1;
+    for i in 0..len {
+        let mint_call = mintCall {
+            to: ALICE,
+            amount: U256::from(amount),
+        }
+        .abi_encode();
+        let op = TxEnv {
+            kind: TxKind::Call(CONTRACT_ADDRESS),
+            data: mint_call.into(),
+            caller: MINTER,
+            nonce: nonce,
+            ..TxEnv::default()
+        };
+        operations.push(op);
+        nonce += 1;
     }
-    .abi_encode();
 
-    operations.push(TxEnv {
-        kind: TxKind::Call(CONTRACT_ADDRESS),
-        data: mint_to_alice.into(),
-        //Mint coins if caller ("from" in this case) is Zero
-        caller: MINTER,
-        // "transaction value in wei" Huh what does that mean. Setting gas cost?
-        value: U256::from(0),
-        ..TxEnv::default()
-    });
+    // Generate transfers
 
-    // Transfer from ALICE to BOB
+    let mut nonces = vec![0; len]; // for transfers
 
     sol! {
         function transfer(address to, uint256 value) external returns (bool);
@@ -140,27 +151,52 @@ fn create_operations() -> Result<Vec<TxEnv>> {
     }
     .abi_encode();
 
-    operations.push(TxEnv {
-        kind: TxKind::Call(CONTRACT_ADDRESS),
-        data: alice_to_bob.into(),
-        caller: ALICE,
-        nonce: 0,
-        ..TxEnv::default()
-    });
+    let expected_len = operations.len() + transfers;
 
-    // Query ALICE's balance
-    sol! {
-        function balanceOf(address account) external view returns (uint256);
+    'outer: for token_id in 0..len {
+        for (from, amount) in (token_id..(token_id + len)).zip(1..len) {
+            if expected_len == operations.len() {
+                break 'outer;
+            }
+
+            let to = addrs[(from + 1) % len];
+            let from_addr = addrs[from % len];
+            let call_data = transferCall {
+                to,
+                value: U256::from(len - amount),
+            }
+            .abi_encode();
+            let op = TxEnv {
+                kind: TxKind::Call(CONTRACT_ADDRESS),
+                data: call_data.into(),
+                caller: from_addr,
+                nonce: nonces[from % len],
+                ..TxEnv::default()
+            };
+            operations.push(op);
+            nonces[from % len] += 1;
+        }
     }
 
-    let query = balanceOfCall { account: ALICE }.abi_encode();
+    // Query ALICE's balance
+    //sol! {
+    //    function balanceOf(address account) external view returns (uint256);
+    //}
 
-    operations.push(TxEnv {
-        kind: TxKind::Call(CONTRACT_ADDRESS),
-        data: query.into(),
-        nonce: 1,
-        ..TxEnv::default()
-    });
+    //let query = balanceOfCall { account: ALICE }.abi_encode();
+
+    //operations.push(TxEnv {
+    //    kind: TxKind::Call(CONTRACT_ADDRESS),
+    //    data: query.into(),
+    //    nonce: 1,
+    //    ..TxEnv::default()
+    //});
 
     Ok(operations)
+}
+
+/// The generation strategy supports up to `num_accounts ^ 2` transfers,
+/// find the smallest number of accounts which will allow for this.
+fn accounts_for_transfers(transfers: usize) -> usize {
+    f64::sqrt(transfers as f64).ceil() as usize + 1
 }
