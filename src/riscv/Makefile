@@ -31,6 +31,14 @@ build: riscv-dummy.elf riscv-sandbox
 	@make -C jstz build
 	@make -C etherlink build
 
+.PHONY: build-revm
+build-revm: assets/revm-kernel.elf assets/revm-inbox.json riscv-sandbox
+	@cargo build --release --workspace $(NATIVE_OPT) $(EXTRA_FLAGS)
+
+.PHONY: run-revm
+run-revm: build-revm
+	@cargo run --release -- run -m supervisor --input assets/revm-kernel.elf --inbox-file assets/revm-inbox.json
+
 .PHONY: riscv-sandbox
 riscv-sandbox::
 	@cargo build --release --package riscv-sandbox $(NATIVE_OPT) $(SANDBOX_ENABLE_FEATURES:%=-F%)
@@ -54,6 +62,15 @@ assets/riscv-dummy.elf assets/riscv-dummy.elf.checksum::
 	@make -C dummy_kernel build
 	@cp dummy_kernel/target/riscv64gc-unknown-linux-musl/release/riscv-dummy $@
 	@sha256sum $@ > $@.checksum
+
+assets/revm-kernel.elf assets/revm-kernel.elf.checksum::
+	@make -C revm build-kernel
+	@cp revm/target/riscv64gc-unknown-linux-musl/release/revm-kernel $@
+	@sha256sum $@ > $@.checksum
+
+assets/revm-inbox.json::
+	@cargo run --manifest-path=revm/Cargo.toml --bin inbox-bench --release
+	@mv inbox.json $@
 
 assets/jstz assets/jstz.checksum::
 	@make -C jstz build-kernel

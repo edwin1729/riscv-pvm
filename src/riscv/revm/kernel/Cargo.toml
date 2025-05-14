@@ -1,0 +1,14 @@
+[package]
+name = "revm-kernel"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+bincode.workspace = true
+tezos-smart-rollup.workspace = true
+tezos_crypto_rs.workspace = true
+revm.workspace = true
+
+[features]
+default = []
+static-inbox = []
