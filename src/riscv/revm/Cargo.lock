@@ -1693,6 +1693,7 @@ version = "0.0.0"
 dependencies = [
  "alloy-sol-types",
  "bincode",
+ "clap",
  "jstz_crypto",
  "revm",
  "tezos-smart-rollup",

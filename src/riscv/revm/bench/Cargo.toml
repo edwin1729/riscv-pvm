@@ -10,4 +10,5 @@ bincode.workspace = true
 tezos_data_encoding.workspace = true
 alloy-sol-types.workspace = true
 revm.workspace = true
+clap.workspace = true
 utils = { path = "../utils" }
