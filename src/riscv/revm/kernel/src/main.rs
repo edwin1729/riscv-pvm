@@ -16,6 +16,8 @@ use tezos_smart_rollup::inbox::InboxMessage;
 use tezos_smart_rollup::michelson::MichelsonUnit;
 use tezos_smart_rollup::prelude::Runtime;
 use tezos_smart_rollup::prelude::*;
+use utils::crypto::Operation;
+use utils::crypto::SignedOperation;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -50,10 +52,12 @@ fn get_inbox_message(
                             address.hash()
                         ).into())
                     } else {
-                        let (tx, _size) = bincode::serde::decode_from_slice(
-                            contents,
-                            bincode::config::standard(),
-                        )?;
+                        let (signed_op, _): (SignedOperation, usize) =
+                            bincode::serde::decode_from_slice(
+                                contents,
+                                bincode::config::standard(),
+                            )?;
+                        let Operation(tx) = signed_op.verify()?;
                         Ok(Some(tx))
                     }
                 }

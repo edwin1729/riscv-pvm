@@ -7,6 +7,7 @@ use std::path::Path;
 use std::vec;
 
 use alloy_sol_types::{SolCall, sol};
+use jstz_crypto::keypair_from_passphrase;
 use revm::{
     context::TxEnv,
     primitives::{Address, TxKind, U256, address, hex},
@@ -16,6 +17,9 @@ use tezos_smart_rollup::inbox::ExternalMessageFrame;
 use tezos_smart_rollup::types::SmartRollupAddress;
 use tezos_smart_rollup::utils::inbox::file::InboxFile;
 use tezos_smart_rollup::utils::inbox::file::Message;
+
+use utils::crypto::Operation;
+use utils::crypto::SignedOperation;
 
 const GLD_CONTRACT_BYTECODE: &str = include_str!("../../contract.bin");
 // This is fragile since it is hardcoded for the GLDToken contract of originator with address 0x1
@@ -40,7 +44,8 @@ pub fn handle_generate(rollup_addr: &str, inbox_file: &Path) -> Result<()> {
 fn generate_inbox(rollup_addr: &str) -> Result<InboxFile> {
     let messages = create_operations()?
         .into_iter()
-        .map(|tx| generate_message(rollup_addr, tx))
+        .enumerate()
+        .map(|(i, tx)| generate_message(rollup_addr, tx, i))
         .collect::<Result<Vec<_>>>()?;
 
     // Output inbox file
@@ -49,11 +54,17 @@ fn generate_inbox(rollup_addr: &str) -> Result<InboxFile> {
 
 /// `TxEnv` is the type a transaction on ethereum (revm). We serialize these transactions using the
 /// external message frame protocol
-fn generate_message(rollup_addr: &str, tx: TxEnv) -> Result<Message> {
+/// We also sign the message with some generated public-private key pair. As its just a
+/// benchmark we don't care that each address should correspond to a pair
+fn generate_message(rollup_addr: &str, tx: TxEnv, i: usize) -> Result<Message> {
     let rollup_addr = SmartRollupAddress::from_b58check(rollup_addr)?;
-    let bytes = bincode::serde::encode_to_vec(&tx, bincode::config::standard())?;
+    // Create signed operation
+    let (sk, pk) = keypair_from_passphrase(&i.to_string())?;
+    let op = Operation(tx);
+    let sig = sk.sign(op.hash()?)?;
+    let signed_op = SignedOperation::new(pk.clone(), sig, op);
+    let bytes = bincode::serde::encode_to_vec(&signed_op, bincode::config::standard())?;
     let mut external = Vec::with_capacity(bytes.len() + EXTERNAL_FRAME_SIZE);
-
     let frame = ExternalMessageFrame::Targetted {
         contents: bytes,
         address: rollup_addr,
