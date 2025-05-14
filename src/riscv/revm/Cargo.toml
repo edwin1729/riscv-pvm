@@ -1,5 +1,5 @@
 [workspace]
-members = ["bench", "kernel"]
+members = ["bench", "kernel", "utils"]
 resolver = "2"
 
 [patch.crates-io]
@@ -19,7 +19,7 @@ tezos_data_encoding = { git = "https://gitlab.com/tezos/tezos.git" }
 alloy-sol-types = "1.1.0"
 
 [workspace.dependencies.bincode]
-version = "2.0.1"
+version = "2.0.0-rc.3"
 features = ["serde"]
 
 [workspace.dependencies.revm]
@@ -39,6 +39,13 @@ features = [
   "extra",
   "native-kernel",
 ]
+
+[workspace.dependencies.jstz_crypto]
+git = "https://github.com/jstz-dev/jstz.git"
+
+[workspace.dependencies.serde]
+version = "1.0.197"
+features = ["derive"]
 
 [workspace.dependencies.tezos_crypto_rs]
 version = "0.6.0"
