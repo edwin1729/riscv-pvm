@@ -5,21 +5,38 @@
 use revm::{
     ExecuteCommitEvm, MainBuilder, MainContext,
     context::{Context, TxEnv},
+    context_interface::result::{ExecutionResult, Output},
     database::CacheDB,
     database_interface::EmptyDB,
 };
-use std::error::Error;
 use tezos_crypto_rs::hash::SmartRollupHash;
 use tezos_smart_rollup::entrypoint;
 use tezos_smart_rollup::inbox::ExternalMessageFrame;
-use tezos_smart_rollup::inbox::InboxMessage;
+use tezos_smart_rollup::inbox::{InboxMessage, InternalInboxMessage};
 use tezos_smart_rollup::michelson::MichelsonUnit;
 use tezos_smart_rollup::prelude::Runtime;
 use tezos_smart_rollup::prelude::*;
 use utils::crypto::Operation;
 use utils::crypto::SignedOperation;
+use utils::data_interface::LogType;
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+enum InboxResult {
+    InboxEmpty,
+    Log(LogType),
+    TxEnv(TxEnv),
+}
+use InboxResult::*;
+
+fn to_inbox_result<T, R, F>(res: Result<T, R>, f: F) -> InboxResult
+where
+    F: FnOnce(T) -> InboxResult,
+    R: std::fmt::Debug,
+{
+    match res {
+        Err(e) => Log(LogType::Error(format!("{:?}", e))),
+        Ok(t) => f(t),
+    }
+}
 
 /// # Returns
 /// Err(_) . Failed to retrieve a valid external failed message. In either case we recover and
@@ -32,42 +49,49 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 fn get_inbox_message(
     host: &mut impl Runtime,
     rollup_address_hash: &SmartRollupHash,
-) -> Result<Option<TxEnv>> {
-    match host.read_input()? {
-        None => Ok(None),
-        Some(input) => {
-            let (_, message) = InboxMessage::<MichelsonUnit>::parse(input.as_ref())
-                .map_err(|e| (format!("{:?}", e)))?;
-            match message {
-                InboxMessage::External(bytes) => {
-                    let ExternalMessageFrame::Targetted { address, contents } =
-                    // err in Result<_,err> returned by parse does not implement std::error:Error so we
-                    // map it to a str
-                    ExternalMessageFrame::parse(bytes)
-                        .map_err(|e| format!("{:?}", e))?;
-                    if rollup_address_hash != address.hash() {
-                        Err(format!(
-                            "Skipping message: External message targets another rollup. Expected: {}. Found: {}\n",
-                            rollup_address_hash,
-                            address.hash()
-                        ).into())
-                    } else {
-                        let (signed_op, _): (SignedOperation, usize) =
-                            bincode::serde::decode_from_slice(
-                                contents,
-                                bincode::config::standard(),
-                            )?;
-                        let Operation(tx) = signed_op.verify()?;
-                        Ok(Some(tx))
+) -> InboxResult {
+    to_inbox_result(host.read_input(), |maybe_inp| match maybe_inp {
+        None => InboxEmpty,
+        Some(input) => to_inbox_result(
+            InboxMessage::<MichelsonUnit>::parse(input.as_ref()),
+            |(_, message)| match message {
+                InboxMessage::External(bytes) => to_inbox_result(
+                    ExternalMessageFrame::parse(bytes),
+                    |ExternalMessageFrame::Targetted { address, contents }| {
+                        if rollup_address_hash != address.hash() {
+                            Log(LogType::Info(format!(
+                                "Skipping message: External message targets another rollup. Expected: {}. Found: {}",
+                                rollup_address_hash,
+                                address.hash()
+                            )))
+                        } else {
+                            to_inbox_result(
+                                bincode::serde::decode_from_slice(
+                                    contents,
+                                    bincode::config::standard(),
+                                ),
+                                |(signed_op, _): (SignedOperation, usize)| {
+                                    to_inbox_result(signed_op.verify(), |Operation(tx)| TxEnv(tx))
+                                },
+                            )
+                        }
+                    },
+                ),
+                InboxMessage::Internal(msg) => match msg {
+                    InternalInboxMessage::StartOfLevel => Log(LogType::StartOfLevel),
+                    InternalInboxMessage::InfoPerLevel(info) => Log(LogType::Info(format!(
+                        "Internal message: level info \
+                            (block predecessor: {}, predecessor_timestamp: {}",
+                        info.predecessor, info.predecessor_timestamp
+                    ))),
+                    InternalInboxMessage::EndOfLevel => Log(LogType::EndOfLevel),
+                    InternalInboxMessage::Transfer(_) => {
+                        Log(LogType::Info("Internal message: transfer".into()))
                     }
-                }
-                InboxMessage::Internal(_) => {
-                    // Ignore any other message
-                    Err("ignore internal message\n".into())
-                }
-            }
-        }
-    }
+                },
+            },
+        ),
+    })
 }
 
 #[entrypoint::main]
@@ -83,18 +107,46 @@ pub fn entry(host: &mut impl Runtime) {
     let rollup_address_hash = host.reveal_metadata().address();
     loop {
         match get_inbox_message(host, &rollup_address_hash) {
-            Ok(Some(tx)) => match evm.transact_commit(tx) {
-                Ok(_res) => {
-                    debug_msg!(host, "Successful transaction\n");
+            TxEnv(tx) => match evm.transact_commit(tx) {
+                Ok(res) => {
+                    let log = handle_res(res);
+                    if let Ok(ser) = serde_json::to_string(&log) {
+                        debug_msg!(host, "{}\n", ser);
+                    }
                 }
                 Err(err) => {
-                    debug_msg!(host, "Unsuccessful transaction: \n{:?}\n", err);
+                    let err = LogType::Error(format!("Unsuccessful transaction: \n{:?}", err));
+                    if let Ok(ser) = serde_json::to_string(&err) {
+                        debug_msg!(host, "{}\n", ser);
+                    }
                 }
             },
-            Ok(None) => {
+            InboxEmpty => {
                 break;
             }
-            Err(e) => debug_msg!(host, "{}", e),
+            Log(log) => {
+                if let Ok(ser) = serde_json::to_string(&log) {
+                    debug_msg!(host, "{}\n", ser);
+                }
+            }
+        }
+    }
+}
+
+fn handle_res(res: ExecutionResult) -> LogType {
+    match res {
+        ExecutionResult::Success {
+            output, //Output::Call(value),
+            ..
+        } => match output {
+            Output::Create(_, _) => LogType::Deploy,
+            Output::Call(bytes) => LogType::Execute(bytes),
+        },
+        ExecutionResult::Revert { .. } => {
+            LogType::Error("Smart contract execution reverted".into())
+        }
+        ExecutionResult::Halt { reason, .. } => {
+            LogType::Error(format!("Halt: reason - {:?}", reason))
         }
     }
 }
