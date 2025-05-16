@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
+// SPDX-FileCopyrightText: 2024 TriliTech <contact@trili.tech>
 //
 // SPDX-License-Identifier: MIT
 
@@ -14,7 +14,7 @@ use results::handle_results;
 mod generate;
 mod results;
 
-const DEFAULT_ROLLUP_ADDRESS: &str = "sr1UNDWPUYVeomgG15wn5jSw689EJ4RNnVQa";
+const DEFAULT_ROLLUP_ADDRESS: &str = "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57";
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 

@@ -3,3 +3,4 @@
 // SPDX-License-Identifier: MIT
 
 pub mod crypto;
+pub mod data_interface;

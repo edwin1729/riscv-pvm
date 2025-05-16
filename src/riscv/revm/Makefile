@@ -40,9 +40,9 @@ build-kernel-native:
 .PHONY: test
 test:
 	@cargo test --no-default-features $(NATIVE_OPT)
-	@../scripts/jstz-bench.sh -t 1
-	@../scripts/jstz-bench.sh -t 1 -s
-	@../scripts/jstz-bench.sh -t 1 -sn
+	@../scripts/revm-bench.sh -t 1
+	@../scripts/revm-bench.sh -t 1 -s
+	@../scripts/revm-bench.sh -t 1 -sn
 
 .PHONY: run
 run:

@@ -11,4 +11,6 @@ tezos_data_encoding.workspace = true
 alloy-sol-types.workspace = true
 revm.workspace = true
 clap.workspace = true
+serde_json.workspace = true
+serde.workspace = true
 utils = { path = "../utils" }

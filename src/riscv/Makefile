@@ -37,7 +37,7 @@ build-revm: assets/revm-kernel.elf assets/revm-inbox.json riscv-sandbox
 
 .PHONY: run-revm
 run-revm: build-revm
-	@cargo run --release -- run -m supervisor --input assets/revm-kernel.elf --inbox-file assets/revm-inbox.json
+	@cargo run --release -- run -m supervisor --address "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57" --input assets/revm-kernel.elf --inbox-file assets/revm-inbox.json
 
 .PHONY: riscv-sandbox
 riscv-sandbox::
@@ -69,7 +69,7 @@ assets/revm-kernel.elf assets/revm-kernel.elf.checksum::
 	@sha256sum $@ > $@.checksum
 
 assets/revm-inbox.json::
-	@cargo run --manifest-path=revm/Cargo.toml --bin inbox-bench --release
+	@cargo run --manifest-path=revm/Cargo.toml --bin inbox-bench --release -- generate --address "sr163Lv22CdE8QagCwf48PWDTquk6isQwv57" --transfers 16
 	@mv inbox.json $@
 
 assets/jstz assets/jstz.checksum::

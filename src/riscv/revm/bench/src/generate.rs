@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::error::Error;
 use std::path::Path;
 use std::vec;
+use std::{error::Error, u64};
 
-use alloy_sol_types::{SolCall, sol};
+use alloy_sol_types::SolCall; // for using `abi_encode`
 use jstz_crypto::{keypair_from_passphrase, public_key::PublicKey, secret_key::SecretKey};
 use revm::{
     context::TxEnv,
@@ -20,10 +20,9 @@ use tezos_smart_rollup::utils::inbox::file::Message;
 
 use utils::crypto::Operation;
 use utils::crypto::SignedOperation;
+use utils::data_interface::{balanceOfCall, mintCall, transferCall};
 
 const GLD_CONTRACT_BYTECODE: &str = include_str!("../../contract.bin");
-// This is fragile since it is hardcoded for the GLDToken contract of originator with address 0x1
-const CONTRACT_ADDRESS: Address = address!("Bd770416a3345F91E4B34576cb804a576fa48EB1");
 // Big enough that it doesn't clash with the 0..num accounts
 const MINTER: Address = address!("9999999999999999999999999999999999999999");
 const EXTERNAL_FRAME_SIZE: usize = 21;
@@ -80,6 +79,7 @@ impl Account {
             data: abi_call,
             caller: self.address,
             nonce: self.nonce,
+            //gas_limit: u64::MAX,
             ..TxEnv::default()
         };
         self.nonce += 1;
@@ -117,7 +117,9 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
     };
 
     let len = accounts_for_transfers(transfers);
-    let mut accounts: Vec<Account> = (0..len)
+    // Account address cannot be 0. This is reserved in ethereum and transactions revert if we try
+    // to use it
+    let mut accounts: Vec<Account> = (1..=len)
         .map(|i| {
             let (sk, pk) = keypair_from_passphrase(&i.to_string())?;
             Ok(Account {
@@ -129,18 +131,14 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
         })
         .collect::<Result<_>>()?;
 
+    // contract addresses in ethereum are a function of the originator and the nonce
+    // we need to calculate it beforehand in order to send transaction to that address
+    let contract: Address = minter.address.create(minter.nonce);
     // deploy the contract
     let bytecode: Vec<u8> = hex::decode(GLD_CONTRACT_BYTECODE)?;
     messages.push(minter.operation_to_message(rollup_addr, TxKind::Create, bytecode.into())?);
 
     // mint coins for everyone
-
-    // Generate abi for the function we want to call from the contract
-    // Solidity source code from https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.3.0/contracts/token/ERC20/IERC20.sol
-    // and my extension of it `GLDToken.sol`
-    sol! {
-        function mint(address to, uint256 amount) public;
-    }
 
     let amount = len + 1;
     for acc in &accounts {
@@ -149,19 +147,12 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
             amount: U256::from(amount),
         }
         .abi_encode();
-        let msg = minter.operation_to_message(
-            rollup_addr,
-            TxKind::Call(CONTRACT_ADDRESS),
-            mint_call.into(),
-        )?;
+        let msg =
+            minter.operation_to_message(rollup_addr, TxKind::Call(contract), mint_call.into())?;
         messages.push(msg);
     }
 
     // Generate transfers
-
-    sol! {
-        function transfer(address to, uint256 value) external returns (bool);
-    }
 
     let expected_len = messages.len() + transfers;
 
@@ -178,7 +169,7 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
             .abi_encode();
             let msg = accounts[from % len].operation_to_message(
                 rollup_addr,
-                TxKind::Call(CONTRACT_ADDRESS),
+                TxKind::Call(contract),
                 call_data.into(),
             )?;
             messages.push(msg);
@@ -187,10 +178,6 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
 
     // Query everyone's balance
 
-    sol! {
-        function balanceOf(address account) external view returns (uint256);
-    }
-
     for acc in &accounts {
         let balance_call = balanceOfCall {
             account: acc.address,
@@ -198,7 +185,7 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
         .abi_encode();
         let msg = minter.operation_to_message(
             rollup_addr,
-            TxKind::Call(CONTRACT_ADDRESS),
+            TxKind::Call(contract),
             balance_call.into(),
         )?;
         messages.push(msg);
@@ -209,6 +196,6 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
 
 /// The generation strategy supports up to `num_accounts ^ 2` transfers,
 /// find the smallest number of accounts which will allow for this.
-fn accounts_for_transfers(transfers: usize) -> usize {
+pub fn accounts_for_transfers(transfers: usize) -> usize {
     f64::sqrt(transfers as f64).ceil() as usize + 1
 }
