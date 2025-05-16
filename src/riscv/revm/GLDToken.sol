@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025 Nomadic Labs <contact@nomadic-labs.com>
+//
 // SPDX-License-Identifier: MIT
 
 // This is the source code of `contract.bin`. Included here for completeness.
@@ -8,19 +10,17 @@
 // npm init -y
 // npm install @openzeppelin/contracts
 // solc-0.8.20 GLDToken.sol --bin --abi --optimize -o build/ --base-path . --include-path node_modules/
+
 pragma solidity ^0.8.20;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract GLDToken is ERC20, Ownable {
-    constructor() ERC20("GOLD", "GLD") Ownable(0x0000000000000000000000000000000000000001) {
-        // Mint some initial supply to the contract deployer
-        //_mint(0x0000000000000000000000000000000000000001, 1000000 * 10 ** decimals()); // 1,000,000 tokens
+contract GLDToken is ERC20 {
+    constructor() ERC20("GOLD", "GLD") {
     }
 
     // Allow the owner to mint additional tokens later
-    function mint(address to, uint256 amount) public onlyOwner {
+    function mint(address to, uint256 amount) public {
         _mint(to, amount);
     }
 }
