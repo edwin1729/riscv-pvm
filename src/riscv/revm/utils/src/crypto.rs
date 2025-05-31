@@ -2,97 +2,92 @@
 //
 // SPDX-License-Identifier: MIT
 
-use jstz_crypto::public_key::PublicKey;
-use jstz_crypto::signature::Signature;
+use libsecp256k1::{Error, Message, Signature, sign, verify};
+pub use libsecp256k1::{PublicKey, SecretKey, curve::Scalar};
 use revm::context::TxEnv;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use tezos_crypto_rs::blake2b::digest_256;
-
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+use sha3::{Digest, Keccak256};
 
 /// All the data for an evm operation is encoded in the `TxEnv` struct.
 /// The wrapper is to add a hash method.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Operation(pub TxEnv);
 
-impl Operation {
-    /// Hash an `Operation`
-    pub fn hash(&self) -> Result<Vec<u8>> {
-        let bytes = bincode::serde::encode_to_vec(self.0.clone(), bincode::config::standard())?;
-        Ok(digest_256(bytes.as_slice()))
+impl From<&Operation> for Vec<u8> {
+    fn from(op: &Operation) -> Self {
+        bincode::serde::encode_to_vec(&op.0, bincode::config::standard()).unwrap()
     }
 }
-/// The Operation along with it's `signature` and `public_key` for verification
-/// * Serializing this data structure uses both the serde and native backends of bincode
-/// * The reason being `TxEnv` from revm does implmenent Encode and Decode. (The developers of revm
-///   weren't keen on supporting this but if `TxEnv` serialization is actually a good idea a case
-///   could be made)
-/// * And when trying to use serde on PublicKey and Signature gives "Serde(AnyNotSupported)" (not
-///   sure why)
+
+/// The Operation along with it's `signature` and `address` for verification
 #[derive(Serialize, Deserialize)]
 pub struct SignedOperation {
-    #[serde(with = "serde_bincode_native")]
-    /// public key created corresponding to secret key used to generate signature
-    pub public_key: PublicKey,
-    #[serde(with = "serde_bincode_native")]
+    // public key
+    pub pk: PublicKey,
+    #[serde(with = "serde_sig")]
     signature: Signature,
     inner: Operation,
 }
 
-/// A helper module that Bincode with `serde` backend will call for delegating to native backend
-mod serde_bincode_native {
-    use bincode::{Decode, Encode};
+mod serde_sig {
+    use super::*;
     use serde::de::Error as DeError;
-    use serde::ser::Error as SerError;
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<T, S>(data: &T, s: S) -> Result<S::Ok, S::Error>
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S>(sig: &Signature, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
-        T: Encode,
     {
-        // 1a) pack into a Vec<u8> via your native Encode
-        let bytes =
-            bincode::encode_to_vec(data, bincode::config::standard()).map_err(SerError::custom)?;
-        // 1b) ask Serde to emit it as a byte sequence
-        s.serialize_bytes(&bytes)
+        let bytes = sig.serialize();
+        s.serialize_bytes(bytes.as_slice())
     }
-
-    pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
+    pub fn deserialize<'de, D>(d: D) -> Result<Signature, D::Error>
     where
         D: Deserializer<'de>,
-        T: Decode,
     {
-        let bytes: Vec<u8> = serde::Deserialize::deserialize(d)?;
-        // 2b) decode it back with your native Decode<C>
-        let (data, _): (T, _) =
-            bincode::decode_from_slice(bytes.as_ref(), bincode::config::standard())
-                .map_err(DeError::custom)?;
-        Ok(data)
+        let bytes: Vec<u8> = Deserialize::deserialize(d)?;
+        let exact_bytes: &[u8; 64] = bytes.as_slice().try_into().map_err(DeError::custom)?;
+        Signature::parse_standard(exact_bytes).map_err(DeError::custom)
     }
 }
 
 impl SignedOperation {
     /// Create a `SignedOperation`
-    pub fn new(public_key: PublicKey, signature: Signature, inner: Operation) -> Self {
+    pub fn sign(pk: PublicKey, sk: SecretKey, inner: Operation) -> Self {
+        let signature = sign(&Self::message_from_op(&inner), &sk).0;
         Self {
-            public_key,
+            pk,
             signature,
             inner,
         }
     }
-
-    /// hash the payload (`Operation`)
-    pub fn hash(&self) -> Result<Vec<u8>> {
-        self.inner.hash()
+    fn message_from_op(op: &Operation) -> Message {
+        let bytes: Vec<u8> = (op).into();
+        let hash: [u8; 32] = Keccak256::digest(bytes).into();
+        Message::parse(&hash)
     }
 
     /// return the payload if the signature is valid
-    pub fn verify(self) -> Result<Operation> {
-        let hash = self.inner.hash()?;
-        self.signature.verify(&self.public_key, hash.as_ref())?;
-
-        Ok(self.inner)
+    pub fn verify(self) -> Option<Operation> {
+        verify(
+            &Self::message_from_op(&self.inner),
+            &self.signature,
+            &self.pk,
+        )
+        .then_some(self.inner)
     }
+}
+
+pub fn address_from_pk(pk: &PublicKey) -> [u8; 20] {
+    // Drop the initial byte which is a tag and hash
+    let hash: [u8; 32] = Keccak256::digest(&pk.serialize()[1..]).into();
+
+    let mut addr = [0u8; 20];
+    addr.copy_from_slice(&hash[12..]);
+    addr
+}
+
+pub fn keypair_from_int(n: u32) -> Result<(SecretKey, PublicKey), Error> {
+    let sk = SecretKey::try_from(Scalar::from_int(n))?;
+    let pk = PublicKey::from_secret_key(&sk);
+    Ok((sk, pk))
 }

@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-jstz_crypto.workspace = true
 tezos_crypto_rs.workspace = true
 revm.workspace = true
 alloy-sol-types.workspace = true
+libsecp256k1.workspace = true
+sha3.workspace = true
 serde.workspace = true
 bincode.workspace = true

@@ -2,15 +2,14 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::error::Error;
 use std::path::Path;
 use std::vec;
-use std::{error::Error, u64};
 
 use alloy_sol_types::SolCall; // for using `abi_encode`
-use jstz_crypto::{keypair_from_passphrase, public_key::PublicKey, secret_key::SecretKey};
 use revm::{
     context::TxEnv,
-    primitives::{Address, Bytes, TxKind, U256, address, hex},
+    primitives::{Address, Bytes, TxKind, U256, hex},
 };
 use tezos_data_encoding::enc::BinWriter;
 use tezos_smart_rollup::inbox::ExternalMessageFrame;
@@ -18,13 +17,11 @@ use tezos_smart_rollup::types::SmartRollupAddress;
 use tezos_smart_rollup::utils::inbox::file::InboxFile;
 use tezos_smart_rollup::utils::inbox::file::Message;
 
-use utils::crypto::Operation;
-use utils::crypto::SignedOperation;
+use utils::crypto;
+use utils::crypto::{Operation, PublicKey, SecretKey, SignedOperation};
 use utils::data_interface::{balanceOfCall, mintCall, transferCall};
 
 const GLD_CONTRACT_BYTECODE: &str = include_str!("../../contract.bin");
-// Big enough that it doesn't clash with the 0..num accounts
-const MINTER: Address = address!("9999999999999999999999999999999999999999");
 const EXTERNAL_FRAME_SIZE: usize = 21;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -85,8 +82,7 @@ impl Account {
         self.nonce += 1;
         // Create signed operation
         let op = Operation(tx);
-        let sig = self.sk.sign(op.hash()?)?;
-        let signed_op = SignedOperation::new(self.pk.clone(), sig, op);
+        let signed_op = SignedOperation::sign(self.pk, self.sk.clone(), op);
         let bytes = bincode::serde::encode_to_vec(&signed_op, bincode::config::standard())?;
         let mut external = Vec::with_capacity(bytes.len() + EXTERNAL_FRAME_SIZE);
         let frame = ExternalMessageFrame::Targetted {
@@ -100,6 +96,20 @@ impl Account {
     }
 }
 
+impl TryFrom<u32> for Account {
+    type Error = Box<dyn Error>;
+    fn try_from(n: u32) -> Result<Self> {
+        let (sk, pk) = crypto::keypair_from_int(n)?;
+        let address = Address::new(crypto::address_from_pk(&pk));
+        Ok(Account {
+            nonce: 0,
+            sk,
+            pk,
+            address,
+        })
+    }
+}
+
 /// 1. Deploy the GLDToken ERC20 contract
 /// 2. Mint fixed amount of coins to each address
 /// 3. Generate trasnfers between the accounts
@@ -108,27 +118,12 @@ fn create_operations(rollup_addr: &SmartRollupAddress, transfers: usize) -> Resu
     // setup
     let mut messages = Vec::new();
 
-    let (sk, pk) = keypair_from_passphrase("foobar")?;
-    let mut minter = Account {
-        nonce: 0,
-        sk,
-        pk,
-        address: MINTER,
-    };
-
+    let mut minter = Account::try_from(1)?;
     let len = accounts_for_transfers(transfers);
     // Account address cannot be 0. This is reserved in ethereum and transactions revert if we try
     // to use it
-    let mut accounts: Vec<Account> = (1..=len)
-        .map(|i| {
-            let (sk, pk) = keypair_from_passphrase(&i.to_string())?;
-            Ok(Account {
-                nonce: 0,
-                sk,
-                pk,
-                address: Address::left_padding_from(&usize::to_be_bytes(i)),
-            })
-        })
+    let mut accounts: Vec<Account> = (2..len as u32 + 2)
+        .map(Account::try_from)
         .collect::<Result<_>>()?;
 
     // contract addresses in ethereum are a function of the originator and the nonce
