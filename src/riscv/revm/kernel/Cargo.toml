@@ -9,7 +9,10 @@ bincode.workspace = true
 tezos-smart-rollup.workspace = true
 tezos_crypto_rs.workspace = true
 revm.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+ruint.workspace = true
+thiserror.workspace = true
 utils = { path = "../utils" }
 
 [features]
