@@ -2,20 +2,21 @@
 //
 // SPDX-License-Identifier: MIT
 
+use database::KernelDB;
 use revm::{
     ExecuteCommitEvm, MainBuilder, MainContext,
     context::{Context, TxEnv},
     context_interface::result::{ExecutionResult, Output},
-    database::CacheDB,
-    database_interface::EmptyDB,
 };
 use tezos_crypto_rs::hash::SmartRollupHash;
 use tezos_smart_rollup::entrypoint;
+use tezos_smart_rollup::host::RuntimeError;
 use tezos_smart_rollup::inbox::ExternalMessageFrame;
 use tezos_smart_rollup::inbox::{InboxMessage, InternalInboxMessage};
 use tezos_smart_rollup::michelson::MichelsonUnit;
 use tezos_smart_rollup::prelude::Runtime;
 use tezos_smart_rollup::prelude::*;
+use tezos_smart_rollup::types::Message;
 use utils::crypto::Operation;
 use utils::crypto::SignedOperation;
 use utils::data_interface::LogType;
@@ -26,6 +27,7 @@ enum InboxResult {
     TxEnv(TxEnv),
 }
 use InboxResult::*;
+mod database;
 
 fn to_inbox_result<T, R, F>(res: Result<T, R>, f: F) -> InboxResult
 where
@@ -47,10 +49,12 @@ where
 /// Ok(None) if no more input to be parsed.
 /// Ok(Some(...)) valid message triggering an EVM transaction
 fn get_inbox_message(
-    host: &mut impl Runtime,
+    //host: &mut impl Runtime,
+    input: Result<Option<Message>, RuntimeError>,
     rollup_address_hash: &SmartRollupHash,
 ) -> InboxResult {
-    to_inbox_result(host.read_input(), |maybe_inp| match maybe_inp {
+    //let foo = host.read_input(    )
+    to_inbox_result(input, |maybe_inp| match maybe_inp {
         None => InboxEmpty,
         Some(input) => to_inbox_result(
             InboxMessage::<MichelsonUnit>::parse(input.as_ref()),
@@ -103,27 +107,29 @@ fn get_inbox_message(
     entrypoint::runtime(static_inbox = "$INBOX_FILE")
 )]
 pub fn entry(host: &mut impl Runtime) {
-    let mut evm = Context::mainnet()
-        .with_db(CacheDB::<EmptyDB>::default())
-        .build_mainnet();
-
     let rollup_address_hash = host.reveal_metadata().address();
+
     loop {
-        match get_inbox_message(host, &rollup_address_hash) {
-            TxEnv(tx) => match evm.transact_commit(tx) {
-                Ok(res) => {
-                    let log = handle_res(res);
-                    if let Ok(ser) = serde_json::to_string(&log) {
-                        debug_msg!(host, "{}\n", ser);
+        match get_inbox_message(host.read_input(), &rollup_address_hash) {
+            TxEnv(tx) => {
+                let mut evm = Context::mainnet()
+                    .with_db(KernelDB::new(host))
+                    .build_mainnet();
+                match evm.transact_commit(tx) {
+                    Ok(res) => {
+                        let log = handle_res(res);
+                        if let Ok(ser) = serde_json::to_string(&log) {
+                            debug_msg!(host, "{}\n", ser);
+                        }
+                    }
+                    Err(err) => {
+                        let err = LogType::Error(format!("Unsuccessful transaction: \n{:?}", err));
+                        if let Ok(ser) = serde_json::to_string(&err) {
+                            debug_msg!(host, "{}\n", ser);
+                        }
                     }
                 }
-                Err(err) => {
-                    let err = LogType::Error(format!("Unsuccessful transaction: \n{:?}", err));
-                    if let Ok(ser) = serde_json::to_string(&err) {
-                        debug_msg!(host, "{}\n", ser);
-                    }
-                }
-            },
+            }
             InboxEmpty => {
                 break;
             }
