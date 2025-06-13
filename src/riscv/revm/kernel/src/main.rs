@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::sync::{Arc, Mutex};
+
 use database::KernelDB;
 use revm::{
     ExecuteCommitEvm, MainBuilder, MainContext,
@@ -109,33 +111,34 @@ fn get_inbox_message(
 pub fn entry(host: &mut impl Runtime) {
     let rollup_address_hash = host.reveal_metadata().address();
 
+    let wrapped_host = Arc::new(Mutex::new(host));
+
+    let mut evm = Context::mainnet()
+        .with_db(KernelDB::new(Arc::clone(&wrapped_host)))
+        .build_mainnet();
     loop {
-        match get_inbox_message(host.read_input(), &rollup_address_hash) {
-            TxEnv(tx) => {
-                let mut evm = Context::mainnet()
-                    .with_db(KernelDB::new(host))
-                    .build_mainnet();
-                match evm.transact_commit(tx) {
-                    Ok(res) => {
-                        let log = handle_res(res);
-                        if let Ok(ser) = serde_json::to_string(&log) {
-                            debug_msg!(host, "{}\n", ser);
-                        }
-                    }
-                    Err(err) => {
-                        let err = LogType::Error(format!("Unsuccessful transaction: \n{:?}", err));
-                        if let Ok(ser) = serde_json::to_string(&err) {
-                            debug_msg!(host, "{}\n", ser);
-                        }
+        let parsed_message = { wrapped_host.lock().unwrap().read_input() };
+        match get_inbox_message(parsed_message, &rollup_address_hash) {
+            TxEnv(tx) => match evm.transact_commit(tx) {
+                Ok(res) => {
+                    let log = handle_res(res);
+                    if let Ok(ser) = serde_json::to_string(&log) {
+                        debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
                     }
                 }
-            }
+                Err(err) => {
+                    let err = LogType::Error(format!("Unsuccessful transaction: \n{:?}", err));
+                    if let Ok(ser) = serde_json::to_string(&err) {
+                        debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
+                    }
+                }
+            },
             InboxEmpty => {
                 break;
             }
             Log(log) => {
                 if let Ok(ser) = serde_json::to_string(&log) {
-                    debug_msg!(host, "{}\n", ser);
+                    debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
                 }
             }
         }
