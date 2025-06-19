@@ -28,7 +28,7 @@ impl SignedOperation {
 
         let pk = self.pk.serialize();
         let sig = self.signature.serialize();
-        let msg = Self::host_message_from_op(&self.inner).serialize();
+        let msg: Vec<u8> = (&self.inner).into();
         unsafe {
             core::arch::asm!(
                 "ecall",
@@ -37,6 +37,7 @@ impl SignedOperation {
                 in("a0") pk.as_ptr(),
                 in("a1") sig.as_ptr(),
                 in("a2") msg.as_ptr(),
+                in("a3") msg.len(),
                 lateout("a0") result,
             );
         }

@@ -279,14 +279,18 @@ where
     let arg_pk_addr = machine.hart.xregisters.read(a0);
     let arg_sig_addr = machine.hart.xregisters.read(a1);
     let arg_msg_addr = machine.hart.xregisters.read(a2);
+    let arg_msg_len = machine.hart.xregisters.read(a3);
 
     let pk_bytes: [u8; 65] = machine.main_memory.read(arg_pk_addr)?;
     let sig_bytes: [u8; 64] = machine.main_memory.read(arg_sig_addr)?;
-    let msg_bytes: [u8; 32] = machine.main_memory.read(arg_msg_addr)?;
+
+    let mut msg_bytes = vec![0u8; arg_msg_len as usize];
+    machine.main_memory.read_all(arg_msg_addr, &mut msg_bytes)?;
+    let hash: [u8; 32] = Keccak256::digest(&msg_bytes).into();
 
     let pk = PublicKey::parse(&pk_bytes).map_err(|_| SbiError::Failed)?;
     let sig = SecpSig::parse_standard(&sig_bytes).map_err(|_| SbiError::Failed)?;
-    let msg = Message::parse(&msg_bytes);
+    let msg = Message::parse(&hash);
     let valid = libsecp256k1::verify(&msg, &sig, &pk);
 
     Ok(valid as u64)
