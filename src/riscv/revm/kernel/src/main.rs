@@ -4,11 +4,17 @@
 
 use std::sync::{Arc, Mutex};
 
+use alloy_trie::TrieAccount;
+use alloy_trie::root::{state_root_unhashed, storage_root_unhashed};
+use core::borrow::Borrow;
 use database::KernelDB;
 use revm::{
     ExecuteCommitEvm, MainBuilder, MainContext,
-    context::{Context, TxEnv},
+    context::{Context, JournalTr, TxEnv},
     context_interface::result::{ExecutionResult, Output},
+    database::{CacheDB, in_memory_db::Cache},
+    database_interface::EmptyDB,
+    primitives::B256,
 };
 use tezos_crypto_rs::hash::SmartRollupHash;
 use tezos_smart_rollup::entrypoint;
@@ -114,8 +120,9 @@ pub fn entry(host: &mut impl Runtime) {
     let wrapped_host = Arc::new(Mutex::new(host));
 
     let mut evm = Context::mainnet()
-        .with_db(KernelDB::new(Arc::clone(&wrapped_host)))
+        .with_db(CacheDB::<EmptyDB>::default())
         .build_mainnet();
+    let mut i = 0;
     loop {
         let parsed_message = { wrapped_host.lock().unwrap().read_input() };
         match get_inbox_message(parsed_message, &rollup_address_hash) {
@@ -142,9 +149,64 @@ pub fn entry(host: &mut impl Runtime) {
                 }
             }
         }
+        //eprintln!("Obladi Oblada");
+        //print_type_of(&evm.ctx.journaled_state.db().cache);
+        if i % 5 == 0 {
+            calculate_state_root(&evm.ctx.journaled_state.db().cache);
+        }
+        i += 1;
     }
 }
-
+fn calculate_state_root(db: &Cache) -> B256 {
+    state_root_unhashed(db.accounts.iter().map(|(address, account)| {
+        let storage_root = storage_root_unhashed(
+            account
+                .storage
+                .iter()
+                .map(|(k, v)| (k.to_be_bytes().into(), *v)),
+        );
+        let info = &account.info;
+        (
+            *address,
+            TrieAccount {
+                nonce: info.nonce,
+                balance: info.balance,
+                storage_root,
+                code_hash: info.code_hash,
+            },
+        )
+    }))
+}
+fn print_type_of<T>(_: &T) {
+    //    let foo: revm_context::evm::Evm<
+    //        revm_context::context::Context<
+    //            revm_context::block::BlockEnv,
+    //            revm_context::tx::TxEnv,
+    //            revm_context::cfg::CfgEnv,
+    //            revm_database_interface::WrapDatabaseRef<
+    //                revm_database::in_memory_db::CacheDB<
+    //                    revm_database_interface::empty_db::EmptyDBTyped<core::convert::Infallible>,
+    //                >,
+    //            >,
+    //        >,
+    //        (),
+    //        revm_handler::instructions::EthInstructions<
+    //            revm_interpreter::interpreter::EthInterpreter,
+    //            revm_context::context::Context<
+    //                revm_context::block::BlockEnv,
+    //                revm_context::tx::TxEnv,
+    //                revm_context::cfg::CfgEnv,
+    //                revm_database_interface::WrapDatabaseRef<
+    //                    revm_database::in_memory_db::CacheDB<
+    //                        revm_database_interface::empty_db::EmptyDBTyped<core::convert::Infallible>,
+    //                    >,
+    //                >,
+    //            >,
+    //        >,
+    //        revm_handler::precompile_provider::EthPrecompiles,
+    //    > = unimplemented!();
+    eprintln!("{}", std::any::type_name::<T>());
+}
 fn handle_res(res: ExecutionResult) -> LogType {
     match res {
         ExecutionResult::Success {

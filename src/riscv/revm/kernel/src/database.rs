@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-use std::sync::{Arc, Mutex};
-
 use bincode::config::standard;
 use revm::database::{Database, DatabaseCommit};
 use revm::primitives::{Address, B256, HashMap, KECCAK_EMPTY, U256, keccak256};
@@ -26,12 +24,12 @@ type Result<T> = std::result::Result<T, KernelError>;
 /// C) And finally the storage is an additional map under each address
 ///   `/s/<address>/<Uint> -> Uint`
 pub struct KernelDB<'a, R: Runtime> {
-    host: Arc<Mutex<&'a mut R>>,
+    host: &'a mut R,
 }
 
 impl<'a, R: Runtime> KernelDB<'a, R> {
     /// Create a database interfacing with the kernel durable storage
-    pub fn new(host: Arc<Mutex<&'a mut R>>) -> Self {
+    pub fn new(host: &'a mut R) -> Self {
         KernelDB { host }
     }
     fn insert_contract(&mut self, account: &mut AccountInfo) -> Result<()> {
@@ -54,10 +52,10 @@ impl<'a, R: Runtime> KernelDB<'a, R> {
         S: Serialize,
     {
         let bytes = bincode::serde::encode_to_vec(data, standard())?;
-        let mut host = self.host.lock().unwrap();
 
         for (i, chunk) in bytes.chunks(MAX_CHUNK).enumerate() {
-            host.store_write(&path.format(), chunk, i * MAX_CHUNK)?;
+            self.host
+                .store_write(&path.format(), chunk, i * MAX_CHUNK)?;
         }
         Ok(())
     }
@@ -65,16 +63,14 @@ impl<'a, R: Runtime> KernelDB<'a, R> {
     where
         D: DeserializeOwned,
     {
-        // We know the program is infact sequential. So acquire the mutex only once (coarse-grained)
-        let host = self.host.lock().unwrap();
-        let n = match host.store_value_size(&path.format()) {
+        let n = match self.host.store_value_size(&path.format()) {
             Ok(n) => n,
             Err(RuntimeError::PathNotFound) => return Ok(None),
             Err(err) => return Err(err.into()),
         };
         let mut buf = vec![0u8; n];
         for i in 0..n.div_ceil(MAX_CHUNK) {
-            let _ = host.store_read_slice(
+            let _ = self.host.store_read_slice(
                 &path.format(),
                 i * MAX_CHUNK,
                 &mut buf[i * MAX_CHUNK..n.min((i + 1) * MAX_CHUNK)],
@@ -87,10 +83,7 @@ impl<'a, R: Runtime> KernelDB<'a, R> {
         Ok(())
     }
     fn clear_storage(&mut self, address: &Address) -> Result<()> {
-        self.host
-            .lock()
-            .unwrap()
-            .store_delete(&Info(address).format())?;
+        self.host.store_delete(&Info(address).format())?;
         Ok(())
     }
 
@@ -141,13 +134,7 @@ impl<'a, R: Runtime> Database for KernelDB<'a, R> {
         match self.store_read(Storage(&address, &index))? {
             Some(val) => Ok(val),
             None => {
-                if self
-                    .host
-                    .lock()
-                    .unwrap()
-                    .store_has(&Info(&address).format())?
-                    .is_some()
-                {
+                if self.host.store_has(&Info(&address).format())?.is_some() {
                     self.insert_new_account(&address)?;
                 }
                 Ok(U256::ZERO)
