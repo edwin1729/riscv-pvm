@@ -27,6 +27,7 @@ use tezos_smart_rollup::prelude::*;
 use tezos_smart_rollup::types::Message;
 use utils::crypto::Operation;
 use utils::crypto::SignedOperation;
+use utils::crypto::sbi::calculate_state_root;
 use utils::data_interface::LogType;
 
 enum InboxResult {
@@ -156,56 +157,6 @@ pub fn entry(host: &mut impl Runtime) {
         }
         i += 1;
     }
-}
-fn calculate_state_root(db: &Cache) -> B256 {
-    state_root_unhashed(db.accounts.iter().map(|(address, account)| {
-        let storage_root = storage_root_unhashed(
-            account
-                .storage
-                .iter()
-                .map(|(k, v)| (k.to_be_bytes().into(), *v)),
-        );
-        let info = &account.info;
-        (
-            *address,
-            TrieAccount {
-                nonce: info.nonce,
-                balance: info.balance,
-                storage_root,
-                code_hash: info.code_hash,
-            },
-        )
-    }))
-}
-fn print_type_of<T>(_: &T) {
-    //    let foo: revm_context::evm::Evm<
-    //        revm_context::context::Context<
-    //            revm_context::block::BlockEnv,
-    //            revm_context::tx::TxEnv,
-    //            revm_context::cfg::CfgEnv,
-    //            revm_database_interface::WrapDatabaseRef<
-    //                revm_database::in_memory_db::CacheDB<
-    //                    revm_database_interface::empty_db::EmptyDBTyped<core::convert::Infallible>,
-    //                >,
-    //            >,
-    //        >,
-    //        (),
-    //        revm_handler::instructions::EthInstructions<
-    //            revm_interpreter::interpreter::EthInterpreter,
-    //            revm_context::context::Context<
-    //                revm_context::block::BlockEnv,
-    //                revm_context::tx::TxEnv,
-    //                revm_context::cfg::CfgEnv,
-    //                revm_database_interface::WrapDatabaseRef<
-    //                    revm_database::in_memory_db::CacheDB<
-    //                        revm_database_interface::empty_db::EmptyDBTyped<core::convert::Infallible>,
-    //                    >,
-    //                >,
-    //            >,
-    //        >,
-    //        revm_handler::precompile_provider::EthPrecompiles,
-    //    > = unimplemented!();
-    eprintln!("{}", std::any::type_name::<T>());
 }
 fn handle_res(res: ExecutionResult) -> LogType {
     match res {

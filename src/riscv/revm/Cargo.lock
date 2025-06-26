@@ -100,9 +100,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "1.1.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a12fe11d0b8118e551c29e1a67ccb6d01cc07ef08086df30f07487146de6fa1"
+checksum = "6177ed26655d4e84e00b65cb494d4e0b8830e7cae7ef5d63087d445a2600fb55"
 dependencies = [
  "alloy-rlp",
  "bytes",
@@ -2596,6 +2596,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "root-hash"
+version = "0.0.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-trie",
+]
+
+[[package]]
 name = "ruint"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3404,6 +3412,7 @@ name = "utils"
 version = "0.1.0"
 dependencies = [
  "alloy-sol-types",
+ "alloy-trie",
  "bincode",
  "libsecp256k1",
  "revm",

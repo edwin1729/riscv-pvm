@@ -6,6 +6,9 @@
 
 use std::cmp::min;
 
+use alloy_trie::TrieAccount;
+use alloy_trie::root::{state_root_unhashed, storage_root_unhashed};
+
 use ed25519_dalek::Signature;
 use ed25519_dalek::Signer;
 use ed25519_dalek::SigningKey;
@@ -316,6 +319,44 @@ where
 
     Ok(hash.len() as u64)
 }
+
+/// Compute ethereum state root hash
+//#[inline]
+//fn handle_tezos_eth_state_root<MC, M>(
+//    machine: &mut MachineCoreState<MC, M>,
+//) -> Result<u64, SbiError>
+//where
+//    MC: MemoryConfig,
+//    M: ManagerReadWrite,
+//{
+//    let arg_out_addr = machine.hart.xregisters.read(a0);
+//    let arg_msg_addr = machine.hart.xregisters.read(a1);
+//    let arg_msg_len = machine.hart.xregisters.read(a2);
+//
+//    let mut msg_bytes = vec![0u8; arg_msg_len as usize];
+//    machine.main_memory.read_all(arg_msg_addr, &mut msg_bytes)?;
+//
+//    let db: Cache = bincode::deserialize(msg_bytes.as_ref()).unwrap();
+//
+//    let hash = state_root_unhashed(db.accounts.iter().map(|(address, account)| {
+//        let storage_root = storage_root_unhashed(
+//            account
+//                .storage
+//                .iter()
+//                .map(|(k, v)| (k.to_be_bytes().into(), *v)),
+//        );
+//        let info = &account.info;
+//        (
+//            *address,
+//            TrieAccount {
+//                nonce: info.nonce,
+//                balance: info.balance,
+//                storage_root,
+//                code_hash: info.code_hash,
+//            },
+//        )
+//    }));
+//}
 
 /// Handle a [SBI_TEZOS_REVEAL] call.
 #[inline]

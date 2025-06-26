@@ -6,7 +6,12 @@
 // needing to define them here.
 
 use super::*;
+use revm::database::in_memory_db::Cache;
+use revm::primitives::B256;
 use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
+
+use alloy_trie::TrieAccount;
+use alloy_trie::root::{state_root_unhashed, storage_root_unhashed};
 
 // TODO: RV-691: Move constant to kernel_sdk
 /// Function ID for `sbi_tezos_secp256k1_verify`
@@ -75,4 +80,26 @@ impl SignedOperation {
             Self::message_from_op(op)
         }
     }
+}
+
+pub fn calculate_state_root(db: &Cache) -> B256 {
+    let foo = bincode::serde::encode_to_vec(db, bincode::config::standard());
+    state_root_unhashed(db.accounts.iter().map(|(address, account)| {
+        let storage_root = storage_root_unhashed(
+            account
+                .storage
+                .iter()
+                .map(|(k, v)| (k.to_be_bytes().into(), *v)),
+        );
+        let info = &account.info;
+        (
+            *address,
+            TrieAccount {
+                nonce: info.nonce,
+                balance: info.balance,
+                storage_root,
+                code_hash: info.code_hash,
+            },
+        )
+    }))
 }

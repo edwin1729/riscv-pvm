@@ -8,6 +8,7 @@ rust-version = "1.86.0"
 workspace = true
 
 [dependencies]
+alloy-trie.workspace = true
 arbitrary-int.workspace = true
 bincode.workspace = true
 cranelift.workspace = true
