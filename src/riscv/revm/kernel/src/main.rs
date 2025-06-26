@@ -78,7 +78,7 @@ fn get_inbox_message(
                                 ),
                                 |(signed_op, _): (SignedOperation, usize)| {
                                     to_inbox_result(
-                                        signed_op.verify().ok_or("verification failed"),
+                                        signed_op.host_verify().ok_or("verification failed"),
                                         |Operation(tx)| TxEnv(tx),
                                     )
                                 },

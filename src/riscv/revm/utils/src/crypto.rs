@@ -7,6 +7,10 @@ pub use libsecp256k1::{PublicKey, SecretKey, curve::Scalar};
 use revm::context::TxEnv;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
+//use crate::sbi_crypto::secp256k1_verify;
+
+#[cfg(target_arch = "riscv64")]
+mod sbi;
 
 /// All the data for an evm operation is encoded in the `TxEnv` struct.
 /// The wrapper is to add a hash method.

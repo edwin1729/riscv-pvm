@@ -5,3 +5,4 @@
 /*.run
 /assets/revm-inbox.json
 /assets/revm-kernel.elf*
+/revm/inbox-bench

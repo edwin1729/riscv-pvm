@@ -13,6 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 ruint.workspace = true
 thiserror.workspace = true
+tezos-smart-rollup-constants.workspace = true
 utils = { path = "../utils" }
 
 [features]

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 tezos_crypto_rs.workspace = true
+tezos-smart-rollup-constants.workspace = true
 revm.workspace = true
 alloy-sol-types.workspace = true
 libsecp256k1.workspace = true
