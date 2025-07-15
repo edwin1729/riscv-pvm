@@ -23,6 +23,7 @@ ieee-apsqrt.workspace = true
 num_enum.workspace = true
 paste.workspace = true
 libsecp256k1.workspace = true
+root-hash.workspace = true
 rustc_apfloat.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -39,6 +40,7 @@ vm-fdt.workspace = true
 itertools.workspace = true
 range-collections.workspace = true
 elf.workspace = true
+
 
 [dependencies.__tracing_do_not_use_directly]
 workspace = true

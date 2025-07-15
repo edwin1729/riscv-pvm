@@ -2601,6 +2601,7 @@ version = "0.0.0"
 dependencies = [
  "alloy-primitives",
  "alloy-trie",
+ "serde",
 ]
 
 [[package]]
@@ -3416,6 +3417,7 @@ dependencies = [
  "bincode",
  "libsecp256k1",
  "revm",
+ "root-hash",
  "serde",
  "sha3",
  "tezos-smart-rollup-constants",

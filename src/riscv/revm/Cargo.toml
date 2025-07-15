@@ -16,12 +16,15 @@ tezos_crypto_rs = { git = "https://gitlab.com/tezos/tezos.git" }
 tezos_data_encoding = { git = "https://gitlab.com/tezos/tezos.git" }
 
 [workspace.dependencies]
-alloy-primitives = "1.2.1"
 alloy-sol-types = "1.1.0"
 alloy-trie = { version = "0.9.0", features = ["ethereum"] }
 serde_json = "1.0.115"
 libsecp256k1 = "0.7.2"
 thiserror = "2.0.12"
+
+[workspace.dependencies.alloy-primitives]
+version = "1.2.1"
+features = ["serde"]
 
 [workspace.dependencies.sha3]
 version = "0.10.8"

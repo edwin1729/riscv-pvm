@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+root-hash = { path = "../root-hash" }
 tezos_crypto_rs.workspace = true
 tezos-smart-rollup-constants.workspace = true
 revm.workspace = true

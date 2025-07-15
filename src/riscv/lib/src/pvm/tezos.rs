@@ -8,6 +8,7 @@ use std::cmp::min;
 
 use alloy_trie::TrieAccount;
 use alloy_trie::root::{state_root_unhashed, storage_root_unhashed};
+use root_hash::EthState;
 
 use ed25519_dalek::Signature;
 use ed25519_dalek::Signer;
@@ -35,6 +36,10 @@ pub const SBI_TEZOS_SECP256K1_VERIFY: u64 = 0x0a;
 // TODO: RV-691: Move constant to kernel_sdk
 /// Function ID for `sbi_tezos_keccak_hash256`
 pub const SBI_TEZOS_KECCAK256_HASH: u64 = 0x0b;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_eth_state_root`
+pub const SBI_TEZOS_ETH_STATE_ROOT: u64 = 0x0c;
 
 // TODO: RV-691: Move constant to kernel_sdk
 /// Maximum size of pvm memory access by a host function in bytes
@@ -321,42 +326,39 @@ where
 }
 
 /// Compute ethereum state root hash
-//#[inline]
-//fn handle_tezos_eth_state_root<MC, M>(
-//    machine: &mut MachineCoreState<MC, M>,
-//) -> Result<u64, SbiError>
-//where
-//    MC: MemoryConfig,
-//    M: ManagerReadWrite,
-//{
-//    let arg_out_addr = machine.hart.xregisters.read(a0);
-//    let arg_msg_addr = machine.hart.xregisters.read(a1);
-//    let arg_msg_len = machine.hart.xregisters.read(a2);
-//
-//    let mut msg_bytes = vec![0u8; arg_msg_len as usize];
-//    machine.main_memory.read_all(arg_msg_addr, &mut msg_bytes)?;
-//
-//    let db: Cache = bincode::deserialize(msg_bytes.as_ref()).unwrap();
-//
-//    let hash = state_root_unhashed(db.accounts.iter().map(|(address, account)| {
-//        let storage_root = storage_root_unhashed(
-//            account
-//                .storage
-//                .iter()
-//                .map(|(k, v)| (k.to_be_bytes().into(), *v)),
-//        );
-//        let info = &account.info;
-//        (
-//            *address,
-//            TrieAccount {
-//                nonce: info.nonce,
-//                balance: info.balance,
-//                storage_root,
-//                code_hash: info.code_hash,
-//            },
-//        )
-//    }));
-//}
+#[inline]
+fn handle_tezos_eth_state_root<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    let arg_out_addr = machine.hart.xregisters.read(a0);
+    let arg_msg_addr = machine.hart.xregisters.read(a1);
+    let arg_msg_len = machine.hart.xregisters.read(a2);
+
+    let mut msg_bytes = vec![0u8; arg_msg_len as usize];
+    machine.main_memory.read_all(arg_msg_addr, &mut msg_bytes)?;
+
+    let db: EthState = bincode::deserialize(msg_bytes.as_ref()).expect("waaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaah");
+
+    let hash = state_root_unhashed(db.iter().map(|(address, account)| {
+        let storage_root = storage_root_unhashed(account.storage.iter().map(|(k, v)| (k.0, v.0)));
+        (
+            *address,
+            TrieAccount {
+                nonce: account.nonce,
+                balance: account.balance.0,
+                storage_root,
+                code_hash: account.code_hash.0,
+            },
+        )
+    }));
+    machine.main_memory.write(arg_out_addr, hash.0)?;
+
+    Ok(hash.len() as u64)
+}
 
 /// Handle a [SBI_TEZOS_REVEAL] call.
 #[inline]
@@ -415,6 +417,7 @@ pub(super) fn handle_tezos<MC, M>(
         SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
         SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
         SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
+        SBI_TEZOS_ETH_STATE_ROOT => sbi_wrap(machine, handle_tezos_eth_state_root),
         SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
         _ => handle_not_supported(&mut machine.hart.xregisters),
     }
