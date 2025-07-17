@@ -6,6 +6,8 @@
 // needing to define them here.
 
 use super::*;
+use alloy_rlp::Encodable;
+use alloy_trie::HashBuilder;
 use alloy_trie::TrieAccount;
 use alloy_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::database::in_memory_db::Cache;
@@ -29,6 +31,14 @@ pub const SBI_TEZOS_ETH_STATE_ROOT: u64 = 0x0c;
 // TODO: RV-691: Move constant to kernel_sdk
 /// Function ID for `sbi_tezos_eth_storage_root`
 pub const SBI_TEZOS_ETH_STORAGE_ROOT: u64 = 0x0d;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_eth_state_root`
+pub const SBI_TEZOS_ETH_INC_HASH_BUILD: u64 = 0x0e;
+//
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_eth_state_root`
+pub const SBI_TEZOS_ETH_FIN_HASH_BUILD: u64 = 0x0f;
 
 // TODO: RV-691: Move constant to kernel_sdk
 /// Maximum size of pvm memory access by a host function in bytes
@@ -114,8 +124,36 @@ fn keccak256(bytes: &[u8]) -> [u8; 32] {
     hash
 }
 
+#[inline(always)]
+fn inc_hash_build(hashed_slot: &B256, value_rlp: &[u8]) {
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a6") SBI_TEZOS_ETH_INC_HASH_BUILD,
+            in("a7") SBI_FIRMWARE_TEZOS,
+            in("a1") hashed_slot.as_ptr(),
+            in("a2") value_rlp.as_ptr(),
+            in("a3") value_rlp.len(),
+        );
+    }
+}
+
+#[inline(always)]
+fn fin_hash_build() -> [u8; 32] {
+    let mut hash = [0u8; 32];
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a6") SBI_TEZOS_ETH_FIN_HASH_BUILD,
+            in("a7") SBI_FIRMWARE_TEZOS,
+            in("a0") hash.as_mut_ptr(),
+        );
+    }
+    hash
+}
+
 pub fn calculate_state_root(db: &Cache) -> B256 {
-    let mut bar: Vec<(B256, TrieAccount)> = db
+    let mut state: Vec<(B256, TrieAccount)> = db
         .accounts
         .iter()
         .map(|(address, account)| {
@@ -127,27 +165,14 @@ pub fn calculate_state_root(db: &Cache) -> B256 {
                 .collect();
             storage.sort_unstable_by_key(|(key, _)| *key);
 
-            let bytes = bincode::serde::encode_to_vec(storage, bincode::config::legacy()).unwrap();
+            // storage is now in the form of a linearized tree which we can incrementally hash
 
-            // TODO macrofy
-            let mut hash = [0u8; 32];
-            let result: isize;
-
-            unsafe {
-                core::arch::asm!(
-                    "ecall",
-                    in("a6") SBI_TEZOS_ETH_STORAGE_ROOT,
-                    in("a7") SBI_FIRMWARE_TEZOS,
-                    in("a0") hash.as_mut_ptr(),
-                    in("a1") bytes.as_ptr(),
-                    in("a2") bytes.len(),
-                    lateout("a0") result,
-                );
+            for (hashed_slot, value) in storage {
+                let value_rlp: Vec<u8> = alloy_rlp::encode_fixed_size(&value).to_vec();
+                inc_hash_build(&hashed_slot, value_rlp.as_ref());
             }
-            assert_eq!(
-                result, 32,
-                "SBI_TEZOS_ETH_STATE_ROOT call returned unexpected value: {result}"
-            );
+
+            let hash = fin_hash_build();
             (
                 B256::new(keccak256(address.as_ref())),
                 TrieAccount {
@@ -159,25 +184,15 @@ pub fn calculate_state_root(db: &Cache) -> B256 {
             )
         })
         .collect();
-    bar.sort_unstable_by_key(|(key, _)| *key);
-    let bytes = bincode::serde::encode_to_vec(bar, bincode::config::legacy()).unwrap();
-    let mut hash = [0u8; 32];
-    let result: isize;
+    state.sort_unstable_by_key(|(key, _)| *key);
+    let mut account_rlp_buf = Vec::new();
+    for (hashed_key, account) in state {
+        account_rlp_buf.clear();
 
-    unsafe {
-        core::arch::asm!(
-            "ecall",
-            in("a6") SBI_TEZOS_ETH_STATE_ROOT,
-            in("a7") SBI_FIRMWARE_TEZOS,
-            in("a0") hash.as_mut_ptr(),
-            in("a1") bytes.as_ptr(),
-            in("a2") bytes.len(),
-            lateout("a0") result,
-        );
+        account.encode(&mut account_rlp_buf);
+
+        inc_hash_build(&hashed_key, account_rlp_buf.as_ref());
     }
-    assert_eq!(
-        result, 32,
-        "SBI_TEZOS_ETH_STATE_ROOT call returned unexpected value: {result}"
-    );
-    hash.into()
+
+    fin_hash_build().into()
 }

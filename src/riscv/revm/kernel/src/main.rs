@@ -8,6 +8,8 @@ use alloy_trie::TrieAccount;
 use alloy_trie::root::{state_root_unhashed, storage_root_unhashed};
 use core::borrow::Borrow;
 use database::KernelDB;
+use goldenfile::Mint;
+
 use revm::{
     ExecuteCommitEvm, MainBuilder, MainContext,
     context::{Context, JournalTr, TxEnv},
@@ -16,6 +18,7 @@ use revm::{
     database_interface::EmptyDB,
     primitives::B256,
 };
+use std::io::Write;
 use tezos_crypto_rs::hash::SmartRollupHash;
 use tezos_smart_rollup::entrypoint;
 use tezos_smart_rollup::host::RuntimeError;
@@ -147,6 +150,14 @@ pub fn entry(host: &mut impl Runtime) {
             Log(log) => {
                 if let Ok(ser) = serde_json::to_string(&log) {
                     debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
+                }
+                //     make a golden file for regression testing
+                if log == LogType::EndOfLevel {
+                    let hash = calculate_state_root(&evm.ctx.journaled_state.db().cache);
+                    eprintln!("{}", hash);
+                    //    let mut mint = Mint::new(format!("goldenfiles/{}", i));
+                    //    let mut file = mint.new_goldenfile("root_hash.txt").unwrap();
+                    //    writeln!(file, "{}", hash).unwrap();
                 }
             }
         }

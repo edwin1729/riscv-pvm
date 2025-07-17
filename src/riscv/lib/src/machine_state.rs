@@ -43,6 +43,7 @@ use crate::state_backend as backend;
 use crate::state_backend::ManagerReadWrite;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
+use alloy_trie::HashBuilder;
 
 /// Layout for the machine 'run state' - which contains everything required for the running of
 /// instructions.
@@ -58,6 +59,7 @@ pub type MachineCoreStateLayout<MC> = (HartStateLayout, <MC as MemoryConfig>::La
 pub struct MachineCoreState<MC: memory::MemoryConfig, M: backend::ManagerBase> {
     pub hart: HartState<M>,
     pub main_memory: MC::State<M>,
+    pub hb: HashBuilder,
 }
 
 impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> {
@@ -116,6 +118,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
         Self {
             hart: HartState::bind(space.0),
             main_memory: MC::bind(space.1),
+            hb: HashBuilder::default(),
         }
     }
 
@@ -159,6 +162,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> NewState<M> for MachineC
         Self {
             hart: HartState::new(manager),
             main_memory: NewState::new(manager),
+            hb: HashBuilder::default(),
         }
     }
 }
@@ -168,6 +172,7 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
         Self {
             hart: self.hart.clone(),
             main_memory: self.main_memory.clone(),
+            hb: HashBuilder::default(),
         }
     }
 }
@@ -744,33 +749,36 @@ mod tests {
     backend_test!(test_instruction_cache, F, {
         // Instruction that writes the value in t1 to the address t0.
         const I_WRITE_T1_TO_ADDRESS_T0: u32 = 0b0011000101010000000100011;
-        assert_eq!(parse_block(&I_WRITE_T1_TO_ADDRESS_T0.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Sw(SBTypeArgs {
+        assert_eq!(
+            parse_block(&I_WRITE_T1_TO_ADDRESS_T0.to_le_bytes()),
+            [Instr::Cacheable(InstrCacheable::Sw(SBTypeArgs {
                 rs1: t0,
                 rs2: t1,
                 imm: 0,
-            }))
-        ]);
+            }))]
+        );
 
         // Instruction that loads 6 into t2.
         const I_LOAD_6_INTO_T2: u32 = 0b11000000000001110010011;
-        assert_eq!(parse_block(&I_LOAD_6_INTO_T2.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
+        assert_eq!(
+            parse_block(&I_LOAD_6_INTO_T2.to_le_bytes()),
+            [Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
                 rd: NonZero(nz::t2),
                 rs1: X0,
                 imm: 6,
-            }))
-        ]);
+            }))]
+        );
 
         // Instruction that loads 5 into t2.
         const I_LOAD_5_INTO_T2: u32 = 0b10100000000001110010011;
-        assert_eq!(parse_block(&I_LOAD_5_INTO_T2.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
+        assert_eq!(
+            parse_block(&I_LOAD_5_INTO_T2.to_le_bytes()),
+            [Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
                 rd: NonZero(nz::t2),
                 rs1: X0,
                 imm: 5,
-            }))
-        ]);
+            }))]
+        );
 
         type LocalLayout = MachineStateLayout<M4K, TestCacheConfig>;
 

@@ -8,6 +8,7 @@ use std::cmp::min;
 
 use alloy_primitives::{B256, U256};
 use alloy_trie::TrieAccount;
+use alloy_trie::hash_builder::HashBuilder;
 use alloy_trie::root::{state_root, storage_root};
 use root_hash::EthState;
 
@@ -18,6 +19,7 @@ use ed25519_dalek::VerifyingKey;
 use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
 use libsecp256k1::Signature as SecpSig;
+use nybbles::Nibbles;
 use rayon::prelude::*;
 use sha3::Digest;
 use sha3::Keccak256;
@@ -46,6 +48,14 @@ pub const SBI_TEZOS_ETH_STATE_ROOT: u64 = 0x0c;
 // TODO: RV-691: Move constant to kernel_sdk
 /// Function ID for `sbi_tezos_eth_storage_root`
 pub const SBI_TEZOS_ETH_STORAGE_ROOT: u64 = 0x0d;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_eth_state_root`
+pub const SBI_TEZOS_ETH_INC_HASH_BUILD: u64 = 0x0e;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_eth_state_root`
+pub const SBI_TEZOS_ETH_FIN_HASH_BUILD: u64 = 0x0f;
 
 // TODO: RV-691: Move constant to kernel_sdk
 /// Maximum size of pvm memory access by a host function in bytes
@@ -332,42 +342,6 @@ where
 }
 
 /// Compute ethereum state root hash
-//#[inline]
-//fn handle_tezos_eth_state_root<MC, M>(
-//    machine: &mut MachineCoreState<MC, M>,
-//) -> Result<u64, SbiError>
-//where
-//    MC: MemoryConfig,
-//    M: ManagerReadWrite,
-//{
-//    let arg_out_addr = machine.hart.xregisters.read(a0);
-//    let arg_msg_addr = machine.hart.xregisters.read(a1);
-//    let arg_msg_len = machine.hart.xregisters.read(a2);
-//
-//    let mut msg_bytes = vec![0u8; arg_msg_len as usize];
-//    machine.main_memory.read_all(arg_msg_addr, &mut msg_bytes)?;
-//
-//    let db: EthState = bincode::deserialize(msg_bytes.as_ref())
-//        .expect("ethereum state not correctly deserialized");
-//
-//    let hash = state_root_unhashed(db.iter().map(|(address, account)| {
-//        let storage_root = storage_root_unhashed(account.storage.iter().map(|(k, v)| (k.0, v.0)));
-//        (
-//            *address,
-//            TrieAccount {
-//                nonce: account.nonce,
-//                balance: account.balance.0,
-//                storage_root,
-//                code_hash: account.code_hash.0,
-//            },
-//        )
-//    }));
-//    machine.main_memory.write(arg_out_addr, hash.0)?;
-//
-//    Ok(hash.len() as u64)
-//}
-
-/// Compute ethereum state root hash
 #[inline]
 fn handle_tezos_eth_state_root<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
@@ -415,6 +389,50 @@ where
 
     let hash = storage_root(db);
     machine.main_memory.write(arg_out_addr, hash.0)?;
+
+    Ok(hash.len() as u64)
+}
+
+/// Compute ethereum state root hash
+#[inline]
+fn handle_tezos_eth_inc_hash_build<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    let key_addr = machine.hart.xregisters.read(a1);
+    let value_addr = machine.hart.xregisters.read(a2);
+    let value_len = machine.hart.xregisters.read(a3);
+
+    let mut key_bytes = vec![0u8; 32];
+    machine.main_memory.read_all(key_addr, &mut key_bytes)?;
+
+    let mut value_bytes = vec![0u8; value_len as usize];
+    machine.main_memory.read_all(value_addr, &mut value_bytes)?;
+
+    machine
+        .hb
+        .add_leaf(Nibbles::unpack(key_bytes), value_bytes.as_ref());
+
+    Ok(1u64)
+}
+
+/// Compute ethereum root hash
+#[inline]
+fn handle_tezos_eth_fin_hash_build<MC, M>(
+    machine: &mut MachineCoreState<MC, M>,
+) -> Result<u64, SbiError>
+where
+    MC: MemoryConfig,
+    M: ManagerReadWrite,
+{
+    let arg_out_addr = machine.hart.xregisters.read(a0);
+
+    let hash: [u8; 32] = machine.hb.root().into();
+    machine.hb = HashBuilder::default();
+    machine.main_memory.write(arg_out_addr, hash)?;
 
     Ok(hash.len() as u64)
 }
@@ -478,6 +496,8 @@ pub(super) fn handle_tezos<MC, M>(
         SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
         SBI_TEZOS_ETH_STATE_ROOT => sbi_wrap(machine, handle_tezos_eth_state_root),
         SBI_TEZOS_ETH_STORAGE_ROOT => sbi_wrap(machine, handle_tezos_eth_storage_root),
+        SBI_TEZOS_ETH_INC_HASH_BUILD => sbi_wrap(machine, handle_tezos_eth_inc_hash_build),
+        SBI_TEZOS_ETH_FIN_HASH_BUILD => sbi_wrap(machine, handle_tezos_eth_fin_hash_build),
         SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
         _ => handle_not_supported(&mut machine.hart.xregisters),
     }

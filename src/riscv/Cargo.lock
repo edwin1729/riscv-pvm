@@ -1863,6 +1863,7 @@ dependencies = [
  "lazy_static",
  "libsecp256k1",
  "num_enum",
+ "nybbles",
  "paste",
  "proptest",
  "rand 0.8.5",

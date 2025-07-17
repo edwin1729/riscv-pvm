@@ -7,14 +7,15 @@ edition = "2021"
 alloy-sol-types.workspace = true
 alloy-trie.workspace = true
 bincode.workspace = true
-tezos-smart-rollup.workspace = true
-tezos_crypto_rs.workspace = true
+goldenfile.workspace = true
 revm.workspace = true
+ruint.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ruint.workspace = true
-thiserror.workspace = true
+tezos_crypto_rs.workspace = true
+tezos-smart-rollup.workspace = true
 tezos-smart-rollup-constants.workspace = true
+thiserror.workspace = true
 utils = { path = "../utils" }
 
 [features]

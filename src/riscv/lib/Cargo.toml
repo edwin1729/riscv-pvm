@@ -23,6 +23,7 @@ enum-tag.workspace = true
 hex.workspace = true
 ieee-apsqrt.workspace = true
 num_enum.workspace = true
+nybbles.workspace = true
 paste.workspace = true
 libsecp256k1.workspace = true
 root-hash.workspace = true
