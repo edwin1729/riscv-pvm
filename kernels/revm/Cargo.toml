@@ -20,6 +20,7 @@ alloy-sol-types = "1.1.0"
 serde_json = "1.0.115"
 libsecp256k1 = "0.7.2"
 thiserror = "2.0.12"
+rayon = "1.10.0"
 
 [workspace.dependencies.sha3]
 version = "0.10.8"
