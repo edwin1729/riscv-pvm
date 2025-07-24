@@ -11,6 +11,7 @@ use tezos_smart_rollup_constants::riscv::SBI_FIRMWARE_TEZOS;
 // TODO: RV-691: Move constant to kernel_sdk
 /// Function ID for `sbi_tezos_secp256k1_verify`
 pub const SBI_TEZOS_SECP256K1_VERIFY: u64 = 0x0a;
+pub const SBI_TEZOS_SECP256K1_BULK_VERIFY: u64 = 0x0d;
 
 // TODO: RV-691: Move constant to kernel_sdk
 /// Function ID for `sbi_tezos_keccak_hash256`
@@ -21,9 +22,36 @@ pub const SBI_TEZOS_KECCAK256_HASH: u64 = 0x0b;
 /// To limit size of proofs in refutation games
 pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
 
+pub fn batch_verify(txs: &[SignedOperation]) -> bool {
+    let verification_data: Vec<_> = txs
+        .iter()
+        .map(|op| {
+            (
+                op.pk.serialize(),
+                op.signature.serialize(),
+                SignedOperation::host_message_from_op(&op.inner).serialize(),
+            )
+        })
+        .collect();
+    let bytes = bincode::encode_to_vec(verification_data, bincode::config::standard()).unwrap();
+    let result: isize;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a6") SBI_TEZOS_SECP256K1_BULK_VERIFY,
+            in("a7") SBI_FIRMWARE_TEZOS,
+            in("a0") bytes.len(),
+            in("a1") bytes.as_ptr(),
+            lateout("a0") result,
+        );
+    }
+
+    result == 1
+}
+
 impl SignedOperation {
     // Secp256k1 verification using a system call
-    pub fn verify(self) -> Option<Operation> {
+    pub fn verify(&self) -> bool {
         let result: isize;
 
         let pk = self.pk.serialize();
@@ -41,7 +69,7 @@ impl SignedOperation {
             );
         }
 
-        (result == 1).then_some(self.inner)
+        result == 1
     }
 
     // Keccak-256 hashing using a system call
