@@ -23,6 +23,7 @@ use memory::BadMemoryAccess;
 use memory::Memory;
 use memory::MemoryConfig;
 use memory::MemoryGovernanceError;
+use rayon::ThreadPool;
 
 use crate::bits::u64;
 use crate::machine_state::block_cache::BlockCacheConfig;
@@ -45,6 +46,8 @@ use crate::state_backend::ManagerReadWrite;
 use crate::traps::EnvironException;
 use crate::traps::Exception;
 
+const tpool_size: usize = 48;
+
 /// Layout for the machine 'run state' - which contains everything required for the running of
 /// instructions.
 pub type MachineCoreStateLayout<MC> = (
@@ -64,6 +67,7 @@ pub struct MachineCoreState<MC: memory::MemoryConfig, M: backend::ManagerBase> {
     pub hart: HartState<M>,
     pub main_memory: MC::State<M>,
     pub signal_actions: SignalActions<M>,
+    pub thread_pool: ThreadPool,
 }
 
 impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> {
@@ -124,6 +128,10 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> MachineCoreState<MC, M> 
             hart: HartState::bind(space.0),
             main_memory: MC::bind(space.1),
             signal_actions: SignalActions::bind(space.2),
+            thread_pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(tpool_size)
+                .build()
+                .unwrap(),
         }
     }
 
@@ -170,6 +178,10 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerBase> NewState<M> for MachineC
             hart: HartState::new(),
             main_memory: NewState::new(),
             signal_actions: SignalActions::new(),
+            thread_pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(tpool_size)
+                .build()
+                .unwrap(),
         }
     }
 }
@@ -180,6 +192,10 @@ impl<MC: memory::MemoryConfig, M: backend::ManagerClone> Clone for MachineCoreSt
             hart: self.hart.clone(),
             main_memory: self.main_memory.clone(),
             signal_actions: self.signal_actions.clone(),
+            thread_pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(tpool_size)
+                .build()
+                .unwrap(),
         }
     }
 }
@@ -834,33 +850,36 @@ mod tests {
     backend_test!(test_instruction_cache, F, {
         // Instruction that writes the value in t1 to the address t0.
         const I_WRITE_T1_TO_ADDRESS_T0: u32 = 0b0011000101010000000100011;
-        assert_eq!(parse_block(&I_WRITE_T1_TO_ADDRESS_T0.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Sw(SBTypeArgs {
+        assert_eq!(
+            parse_block(&I_WRITE_T1_TO_ADDRESS_T0.to_le_bytes()),
+            [Instr::Cacheable(InstrCacheable::Sw(SBTypeArgs {
                 rs1: t0,
                 rs2: t1,
                 imm: 0,
-            }))
-        ]);
+            }))]
+        );
 
         // Instruction that loads 6 into t2.
         const I_LOAD_6_INTO_T2: u32 = 0b11000000000001110010011;
-        assert_eq!(parse_block(&I_LOAD_6_INTO_T2.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
+        assert_eq!(
+            parse_block(&I_LOAD_6_INTO_T2.to_le_bytes()),
+            [Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
                 rd: NonZero(nz::t2),
                 rs1: X0,
                 imm: 6,
-            }))
-        ]);
+            }))]
+        );
 
         // Instruction that loads 5 into t2.
         const I_LOAD_5_INTO_T2: u32 = 0b10100000000001110010011;
-        assert_eq!(parse_block(&I_LOAD_5_INTO_T2.to_le_bytes()), [
-            Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
+        assert_eq!(
+            parse_block(&I_LOAD_5_INTO_T2.to_le_bytes()),
+            [Instr::Cacheable(InstrCacheable::Addi(SplitITypeArgs {
                 rd: NonZero(nz::t2),
                 rs1: X0,
                 imm: 5,
-            }))
-        ]);
+            }))]
+        );
 
         type LocalLayout = MachineStateLayout<M4K, TestCacheConfig>;
 

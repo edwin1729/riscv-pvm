@@ -289,15 +289,17 @@ where
         bincode::decode_from_slice(&msg_bytes, bincode::config::standard())
             .map_err(|_e| SbiError::InvalidParam)?;
 
-    let all_verified = verification_data
-        .par_iter()
-        .map(|(pk_bytes, sig_bytes, msg_bytes)| {
-            let pk = PublicKey::parse(pk_bytes).ok()?;
-            let sig = SecpSig::parse_standard(sig_bytes).ok()?;
-            let msg = Message::parse(msg_bytes);
-            Some(libsecp256k1::verify(&msg, &sig, &pk))
-        })
-        .all(|x| x.unwrap_or(false));
+    let all_verified = machine.thread_pool.install(|| {
+        verification_data
+            .par_iter()
+            .map(|(pk_bytes, sig_bytes, msg_bytes)| {
+                let pk = PublicKey::parse(pk_bytes).ok()?;
+                let sig = SecpSig::parse_standard(sig_bytes).ok()?;
+                let msg = Message::parse(msg_bytes);
+                Some(libsecp256k1::verify(&msg, &sig, &pk))
+            })
+            .all(|x| x.unwrap_or(false))
+    });
 
     Ok(all_verified as u64)
 }
