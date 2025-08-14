@@ -7,10 +7,10 @@ use libsecp256k1::{sign, Error, Message, Signature};
 
 #[cfg(not(target_arch = "riscv64"))]
 use libsecp256k1::verify;
+use rayon::prelude::*;
 use revm::context::TxEnv;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
-//use crate::sbi_crypto::secp256k1_verify;
 
 #[cfg(target_arch = "riscv64")]
 mod sbi;
@@ -33,7 +33,7 @@ pub struct SignedOperation {
     pub pk: PublicKey,
     #[serde(with = "serde_sig")]
     signature: Signature,
-    inner: Operation,
+    pub inner: Operation,
 }
 
 mod serde_sig {
@@ -76,19 +76,21 @@ impl SignedOperation {
     /// return the payload if the signature is valid
     /// Only for native compilation. Otherwise the host function found in `crypto/sbi.rs` is used
     #[cfg(not(target_arch = "riscv64"))]
-    pub fn verify(self) -> Option<Operation> {
+    pub fn verify(&self) -> bool {
         verify(
             &Self::message_from_op(&self.inner),
             &self.signature,
             &self.pk,
         )
-        .then_some(self.inner)
     }
+}
 
-    /// For benchmarks not using verification of signatures of each transaction
-    pub fn no_verify(self) -> Option<Operation> {
-        Some(self.inner)
-    }
+pub fn batch_verify(txs: &[SignedOperation]) -> bool {
+    #[cfg(not(target_arch = "riscv64"))]
+    return txs.par_iter().map(|x| x.verify()).all(|x| x);
+
+    #[cfg(target_arch = "riscv64")]
+    return sbi::batch_verify(txs);
 }
 
 pub fn address_from_pk(pk: &PublicKey) -> [u8; 20] {

@@ -10,7 +10,6 @@ use std::sync::Mutex;
 #[cfg(not(feature = "in-memory-db"))]
 use database::KernelDB;
 use revm::context::Context;
-use revm::context::TxEnv;
 use revm::context_interface::result::ExecutionResult;
 use revm::context_interface::result::Output;
 #[cfg(feature = "in-memory-db")]
@@ -30,14 +29,16 @@ use tezos_smart_rollup::michelson::MichelsonUnit;
 use tezos_smart_rollup::prelude::Runtime;
 use tezos_smart_rollup::prelude::*;
 use tezos_smart_rollup::types::Message;
-use utils::crypto::Operation;
+use utils::crypto::batch_verify;
 use utils::crypto::SignedOperation;
 use utils::data_interface::LogType;
+
+const BATCH_SIZE: usize = 16;
 
 enum InboxResult {
     InboxEmpty,
     Log(LogType),
-    TxEnv(TxEnv),
+    SignedOperation(SignedOperation),
 }
 use InboxResult::*;
 
@@ -90,14 +91,7 @@ fn get_inbox_message(
                                     bincode::config::standard(),
                                 ),
                                 |(signed_op, _): (SignedOperation, usize)| {
-                                    #[cfg(not(feature = "no-verify"))]
-                                    let op = signed_op.verify();
-                                    #[cfg(feature = "no-verify")]
-                                    let op = signed_op.no_verify();
-                                    to_inbox_result(
-                                        op.ok_or("verification failed"),
-                                        |Operation(tx)| TxEnv(tx),
-                                    )
+                                    SignedOperation(signed_op)
                                 },
                             )
                         }
@@ -136,10 +130,24 @@ pub fn entry(host: &mut impl Runtime) {
     let db = CacheDB::<EmptyDB>::default();
 
     let mut evm = Context::mainnet().with_db(db).build_mainnet();
-    loop {
-        let parsed_message = { wrapped_host.lock().unwrap().read_input() };
-        match get_inbox_message(parsed_message, &rollup_address_hash) {
-            TxEnv(tx) => match evm.transact_commit(tx) {
+    let mut txs = Vec::new();
+
+    // The type of `evm` above is quite messy
+    // So I will use a closure instead of function to avoid the boilerplate
+
+    // Verify the all signatures of transaction in the batch
+    // Then execute all transactions
+    let mut process_txs = |txs: &[SignedOperation]| {
+        // verification through sequential system call
+        #[cfg(all(not(feature = "parallel-verify"), not(feature = "no-verify")))]
+        assert!(txs.iter().map(|x| x.verify()).all(|x| x));
+        // batch signature verification using a parallel system call
+        #[cfg(feature = "parallel-verify")]
+        assert!(batch_verify(txs));
+
+        for signed_op in txs {
+            let tx = signed_op.inner.0.clone();
+            match evm.transact_commit(tx.clone()) {
                 Ok(res) => {
                     let log = handle_res(res);
                     if let Ok(ser) = serde_json::to_string(&log) {
@@ -152,11 +160,27 @@ pub fn entry(host: &mut impl Runtime) {
                         debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
                     }
                 }
-            },
+            }
+        }
+    };
+
+    loop {
+        let parsed_message = { wrapped_host.lock().unwrap().read_input() };
+        match get_inbox_message(parsed_message, &rollup_address_hash) {
+            SignedOperation(so) => {
+                txs.push(so);
+                if txs.len() == BATCH_SIZE {
+                    process_txs(&txs);
+                    txs.clear();
+                }
+            }
             InboxEmpty => {
                 break;
             }
             Log(log) => {
+                if log == LogType::EndOfLevel {
+                    process_txs(&txs);
+                }
                 if let Ok(ser) = serde_json::to_string(&log) {
                     debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
                 }

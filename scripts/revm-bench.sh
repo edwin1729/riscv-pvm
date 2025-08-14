@@ -7,7 +7,7 @@
 # Build and run the revm TPS benchmark with the specified number of transfers
 
 set -e
-USAGE="Usage: -t <num_transfers> [ -s: static inbox ] [ -p: profile with samply ] [ -n: run natively ] [ -i <num_iterations>: number of runs ] [ -j <disable|inline>: disable jit / use inline jit ] [ -m <all | jit-unsupported>: enable metrics ] [ -h: memory Cache db] [ -u: transaction signatures Unverified]"
+USAGE="Usage: -t <num_transfers> [ -s: static inbox ] [ -p: profile with samply ] [ -n: run natively ] [ -i <num_iterations>: number of runs ] [ -j <disable|inline>: disable jit / use inline jit ] [ -m <all | jit-unsupported>: enable metrics ] [ -h: memory Cache db] [ -u: transaction signatures Unverified] [ -c: transaction verification in parallel]"
 DEFAULT_ROLLUP_ADDRESS="sr163Lv22CdE8QagCwf48PWDTquk6isQwv57"
 
 ITERATIONS="1"
@@ -27,13 +27,16 @@ CURR=$(pwd)
 RISCV_DIR=$(dirname "$0")/..
 cd "$RISCV_DIR"
 
-while getopts "i:t:m:spnj:hu" OPTION; do
+while getopts "i:t:m:spnj:cuh" OPTION; do
   case "$OPTION" in
   h)
     CONFIG_FLAGS="$CONFIG_FLAGS -F in-memory-db"
     ;;
   u)
     CONFIG_FLAGS="$CONFIG_FLAGS -F no-verify"
+    ;;
+  c)
+    CONFIG_FLAGS="$CONFIG_FLAGS -F parallel-verify"
     ;;
   i)
     ITERATIONS="$OPTARG"
