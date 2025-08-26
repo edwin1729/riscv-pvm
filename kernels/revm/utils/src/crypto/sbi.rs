@@ -23,25 +23,24 @@ pub const SBI_TEZOS_KECCAK256_HASH: u64 = 0x0b;
 pub const MAX_PVM_MEMORY_ACCESS: usize = 4096;
 
 pub fn batch_verify(txs: &[SignedOperation]) -> bool {
-    let verification_data: Vec<_> = txs
-        .iter()
-        .map(|op| {
-            (
-                op.pk.serialize(),
-                op.signature.serialize(),
-                SignedOperation::host_message_from_op(&op.inner).serialize(),
-            )
-        })
-        .collect();
-    let bytes = bincode::encode_to_vec(verification_data, bincode::config::standard()).unwrap();
+    let mut pks = Vec::new();
+    let mut sigs = Vec::new();
+    let mut msg_hashes = Vec::new();
+    for op in txs {
+        pks.push(op.pk.serialize());
+        sigs.push(op.signature.serialize());
+        msg_hashes.push(SignedOperation::host_message_from_op(&op.inner).serialize());
+    }
     let result: isize;
     unsafe {
         core::arch::asm!(
             "ecall",
             in("a6") SBI_TEZOS_SECP256K1_BULK_VERIFY,
             in("a7") SBI_FIRMWARE_TEZOS,
-            in("a0") bytes.len(),
-            in("a1") bytes.as_ptr(),
+            in("a0") pks.len(),
+            in("a1") pks.as_ptr(), // TODO ensure this is correct. not inlateout, ...
+            in("a2") sigs.as_ptr(),
+            in("a3") msg_hashes.as_ptr(),
             lateout("a0") result,
         );
     }

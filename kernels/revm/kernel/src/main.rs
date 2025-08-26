@@ -34,7 +34,7 @@ use utils::crypto::batch_verify;
 use utils::crypto::SignedOperation;
 use utils::data_interface::LogType;
 
-const BATCH_SIZE: usize = 16;
+const BATCH_SIZE: usize = 256;
 
 enum InboxResult {
     InboxEmpty,

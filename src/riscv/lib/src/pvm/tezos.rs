@@ -277,20 +277,29 @@ where
     M: ManagerReadWrite,
 {
     let arg_len = machine.hart.xregisters.read(a0);
-    let arg_vec = machine.hart.xregisters.read(a1);
 
-    let mut msg_bytes = vec![0u8; arg_len as usize];
-    machine.main_memory.read_all(arg_vec, &mut msg_bytes)?;
-    let (verification_data, _): (SigVerificationBatch, usize) =
-        bincode::decode_from_slice(&msg_bytes, bincode::config::standard())
-            .map_err(|_e| SbiError::InvalidParam)?;
+    // TODO do I need to fill it with zeros?
+    let mut pks = vec![[0u8; 65]; arg_len as usize];
+    machine
+        .main_memory
+        .read_all(machine.hart.xregisters.read(a1), &mut pks)?;
+    let mut sigs = vec![[0u8; 64]; arg_len as usize];
+    machine
+        .main_memory
+        .read_all(machine.hart.xregisters.read(a2), &mut sigs)?;
+    let mut msg_hashes = vec![[0u8; 32]; arg_len as usize];
+    machine
+        .main_memory
+        .read_all(machine.hart.xregisters.read(a3), &mut msg_hashes)?;
 
-    let all_verified = verification_data
+    let all_verified = pks
         .par_iter()
-        .map(|(pk_bytes, sig_bytes, msg_bytes)| {
-            let pk = PublicKey::parse(pk_bytes).ok()?;
-            let sig = SecpSig::parse_standard(sig_bytes).ok()?;
-            let msg = Message::parse(msg_bytes);
+        .zip(sigs)
+        .zip(msg_hashes)
+        .map(|((pk_bytes, sig_bytes), msg_bytes)| {
+            let pk = PublicKey::parse(&pk_bytes).ok()?;
+            let sig = SecpSig::parse_standard(&sig_bytes).ok()?;
+            let msg = Message::parse(&msg_bytes);
             Some(libsecp256k1::verify(&msg, &sig, &pk))
         })
         .all(|x| x.unwrap_or(false));
