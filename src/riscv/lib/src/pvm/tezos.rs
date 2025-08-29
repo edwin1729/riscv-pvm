@@ -355,6 +355,7 @@ pub(super) fn handle_tezos<MC, M>(
     machine: &mut MachineCoreState<MC, M>,
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
+    max_steps: usize,
 ) where
     MC: MemoryConfig,
     M: ManagerReadWrite,

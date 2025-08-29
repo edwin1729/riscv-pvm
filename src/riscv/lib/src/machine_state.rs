@@ -856,6 +856,7 @@ mod tests {
                         &mut state.status,
                         &mut state.reveal_request,
                         StdoutDebugHooks,
+                        usize::MAX,
                     );
                     Ok(shall_continue)
                 });
