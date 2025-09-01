@@ -267,7 +267,7 @@ where
 
 macro_rules! mk_parallel_system_call {
 
-    ($name:ident, map: $map:expr,
+    ($name:ident, map: $map:expr, // Use just a single function fold and get rid of map?
     inputs: [$(($data:ident, $data_size:expr, $data_reg:expr)),* $(,)?]) => {
 
         /// Verify a Secp256k1 signature.
@@ -277,11 +277,12 @@ macro_rules! mk_parallel_system_call {
             MC: MemoryConfig,
             M: ManagerReadWrite,
         {
-            let arg_len = machine.hart.xregisters.read(a0);
+            let total_steps = machine.hart.xregisters.read(a0);
+            let curr_steps = min (total_steps, max_steps as u64);
 
             // TODO do I need to fill it with zeros?
             $(
-                let mut $data = vec![[0u8; $data_size]; arg_len as usize];
+                let mut $data = vec![[0u8; $data_size]; curr_steps as usize];
                 machine.main_memory
                     .read_all(machine.hart.xregisters.read($data_reg), &mut $data)?;
             )*
@@ -291,6 +292,21 @@ macro_rules! mk_parallel_system_call {
                 .map($map)
                 .all(|x| x.unwrap_or(false));
 
+            // update the state which is captured just using the registers
+            // NOTE the registers must be marked in+out in the call
+
+            // drop the first arg_len elements of each input
+            $(machine.hart.xregisters.write($data_reg,
+                machine.hart.xregisters.read($data_reg).saturating_add($data_size * curr_steps));)*
+            // complete arg_len steps of the whole computation
+            machine.hart.xregisters.write(a0, total_steps - curr_steps);
+            // TODO not sure about saturating semantics here. Should I use `uint` type for
+            // total/curr steps?
+
+            if total_steps > curr_steps { // pc gets incremented for all syscalls by default undo it
+                machine.hart.pc.write(machine.hart.pc.read().saturating_sub(4));
+            }
+
             Ok(res as u64)
         }
     }
@@ -299,9 +315,9 @@ macro_rules! mk_parallel_system_call {
 mk_parallel_system_call!(handle_tezos_secp256k1_bulk_verify,
 
     map: |(pk_bytes, sig_bytes, msg_bytes)| {
-        let pk = PublicKey::parse(&pk_bytes).ok()?;
-        let sig = SecpSig::parse_standard(&sig_bytes).ok()?;
-        let msg = Message::parse(&msg_bytes);
+        let pk = PublicKey::parse(pk_bytes).ok()?;
+        let sig = SecpSig::parse_standard(sig_bytes).ok()?;
+        let msg = Message::parse(msg_bytes);
         Some(libsecp256k1::verify(&msg, &sig, &pk))
     },
     inputs: [(pks, 65, a1), (sigs, 64, a2), (msg_hashes, 32, a3)]
