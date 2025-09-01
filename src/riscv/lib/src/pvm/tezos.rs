@@ -47,6 +47,7 @@ use crate::machine_state::registers::a0;
 use crate::machine_state::registers::a1;
 use crate::machine_state::registers::a2;
 use crate::machine_state::registers::a3;
+use crate::machine_state::registers::a4;
 use crate::machine_state::registers::a6;
 use crate::state_backend::Cell;
 use crate::state_backend::ManagerReadWrite;
@@ -267,8 +268,11 @@ where
 
 macro_rules! mk_parallel_system_call {
 
-    ($name:ident, map: $map:expr, // Use just a single function fold and get rid of map?
-    inputs: [$(($data:ident, $data_size:expr, $data_reg:expr)),* $(,)?]) => {
+    (
+        $name:ident, map: $map:expr,
+        inputs: [$(($data:ident, $data_size:expr, $data_reg:expr)),* $(,)?],
+        output: ($out_ty:ty, $out_size:expr, $out_reg:expr)
+    ) => {
 
         /// Verify a Secp256k1 signature.
         #[inline]
@@ -280,6 +284,7 @@ macro_rules! mk_parallel_system_call {
             let total_steps = machine.hart.xregisters.read(a0);
             let curr_steps = min (total_steps, max_steps as u64);
 
+            // TODO use Elem correctly
             // TODO do I need to fill it with zeros?
             $(
                 let mut $data = vec![[0u8; $data_size]; curr_steps as usize];
@@ -287,10 +292,13 @@ macro_rules! mk_parallel_system_call {
                     .read_all(machine.hart.xregisters.read($data_reg), &mut $data)?;
             )*
 
-            let res = ($($data),*)
+            let res: Vec<$out_ty> = ($($data),*)
                 .par_iter()
                 .map($map)
-                .all(|x| x.unwrap_or(false));
+                .collect();
+
+            machine.main_memory
+                .write_all(machine.hart.xregisters.read($out_reg), &res)?;
 
             // update the state which is captured just using the registers
             // NOTE the registers must be marked in+out in the call
@@ -300,14 +308,14 @@ macro_rules! mk_parallel_system_call {
                 machine.hart.xregisters.read($data_reg).saturating_add($data_size * curr_steps));)*
             // complete arg_len steps of the whole computation
             machine.hart.xregisters.write(a0, total_steps - curr_steps);
-            // TODO not sure about saturating semantics here. Should I use `uint` type for
-            // total/curr steps?
+            // move the output pointer forward
+            machine.hart.xregisters.write($out_reg, machine.hart.xregisters.read($out_reg).saturating_add($out_size * curr_steps));
 
             if total_steps > curr_steps { // pc gets incremented for all syscalls by default undo it
-                machine.hart.pc.write(machine.hart.pc.read().saturating_sub(4));
+                machine.hart.pc.write(machine.hart.pc.read() - 4);
             }
 
-            Ok(res as u64)
+            Ok(1)
         }
     }
 }
@@ -315,12 +323,18 @@ macro_rules! mk_parallel_system_call {
 mk_parallel_system_call!(handle_tezos_secp256k1_bulk_verify,
 
     map: |(pk_bytes, sig_bytes, msg_bytes)| {
-        let pk = PublicKey::parse(pk_bytes).ok()?;
-        let sig = SecpSig::parse_standard(sig_bytes).ok()?;
-        let msg = Message::parse(msg_bytes);
-        Some(libsecp256k1::verify(&msg, &sig, &pk))
+        // This strange closure is just for using the `?` operator and still not
+        // returning an option. TODO is there a sensible solution?
+        let lazy = || {
+            let pk = PublicKey::parse(pk_bytes).ok()?;
+            let sig = SecpSig::parse_standard(sig_bytes).ok()?;
+            let msg = Message::parse(msg_bytes);
+            Some(libsecp256k1::verify(&msg, &sig, &pk))
+        };
+        lazy().unwrap_or(false)
     },
-    inputs: [(pks, 65, a1), (sigs, 64, a2), (msg_hashes, 32, a3)]
+    inputs: [(pks, 65, a1), (sigs, 64, a2), (msg_hashes, 32, a3)],
+    output: (bool, 1, a4)
 );
 
 /// Verify a Secp256k1 signature.
