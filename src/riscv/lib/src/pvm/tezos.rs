@@ -13,6 +13,7 @@ use ed25519_dalek::VerifyingKey;
 use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
 use libsecp256k1::Signature as SecpSig;
+use rayon::prelude::*;
 use sha3::Digest;
 use sha3::Keccak256;
 use tezos_smart_rollup_constants::core::MAX_INPUT_MESSAGE_SIZE;
@@ -26,6 +27,10 @@ use tezos_smart_rollup_constants::riscv::SBI_TEZOS_KECCAK256_HASH;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_REVEAL;
 use tezos_smart_rollup_constants::riscv::SBI_TEZOS_SECP256K1_VERIFY;
 use tezos_smart_rollup_constants::riscv::SbiError;
+
+// TODO: RV-691: Move constant to kernel_sdk
+/// Function ID for `sbi_tezos_secp256k1_verify`
+pub const SBI_TEZOS_SECP256K1_BULK_VERIFY: u64 = 0x0d;
 
 /// Maximum size of pvm memory access by a host function in bytes
 /// To limit size of proofs in refutation games
@@ -260,6 +265,48 @@ where
     Ok(hash.len() as u64)
 }
 
+macro_rules! mk_parallel_system_call {
+
+    ($name:ident, map: $map:expr,
+    inputs: [$(($data:ident, $data_size:expr, $data_reg:expr)),* $(,)?]) => {
+
+        /// Verify a Secp256k1 signature.
+        #[inline]
+        fn $name<MC, M>( machine: &mut MachineCoreState<MC, M>, max_steps: usize,) -> Result<u64, SbiError>
+        where
+            MC: MemoryConfig,
+            M: ManagerReadWrite,
+        {
+            let arg_len = machine.hart.xregisters.read(a0);
+
+            // TODO do I need to fill it with zeros?
+            $(
+                let mut $data = vec![[0u8; $data_size]; arg_len as usize];
+                machine.main_memory
+                    .read_all(machine.hart.xregisters.read($data_reg), &mut $data)?;
+            )*
+
+            let res = ($($data),*)
+                .par_iter()
+                .map($map)
+                .all(|x| x.unwrap_or(false));
+
+            Ok(res as u64)
+        }
+    }
+}
+
+mk_parallel_system_call!(handle_tezos_secp256k1_bulk_verify,
+
+    map: |(pk_bytes, sig_bytes, msg_bytes)| {
+        let pk = PublicKey::parse(&pk_bytes).ok()?;
+        let sig = SecpSig::parse_standard(&sig_bytes).ok()?;
+        let msg = Message::parse(&msg_bytes);
+        Some(libsecp256k1::verify(&msg, &sig, &pk))
+    },
+    inputs: [(pks, 65, a1), (sigs, 64, a2), (msg_hashes, 32, a3)]
+);
+
 /// Verify a Secp256k1 signature.
 #[inline]
 fn handle_tezos_secp256k1_verify<MC, M>(
@@ -367,6 +414,9 @@ pub(super) fn handle_tezos<MC, M>(
         SBI_TEZOS_ED25519_VERIFY => sbi_wrap(machine, handle_tezos_ed25519_verify),
         SBI_TEZOS_BLAKE2B_HASH256 => sbi_wrap(machine, handle_tezos_blake2b_hash256),
         SBI_TEZOS_SECP256K1_VERIFY => sbi_wrap(machine, handle_tezos_secp256k1_verify),
+        SBI_TEZOS_SECP256K1_BULK_VERIFY => sbi_wrap(machine, |machine| {
+            handle_tezos_secp256k1_bulk_verify(machine, max_steps)
+        }),
         SBI_TEZOS_KECCAK256_HASH => sbi_wrap(machine, handle_tezos_keccak256_hash),
         SBI_TEZOS_REVEAL => handle_tezos_reveal(machine, reveal_request, status),
         _ => handle_not_supported(&mut machine.hart.xregisters),
