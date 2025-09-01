@@ -26,6 +26,7 @@ use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
+use crate::range_utils::unwrap_bound;
 use crate::state::NewState;
 use crate::state_backend;
 use crate::state_backend::AllocatedOf;
@@ -241,6 +242,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
                     &mut self.status,
                     &mut self.reveal_request,
                     &mut hooks,
+                    1,
                 ))
             });
 
@@ -287,6 +289,7 @@ impl<MC: MemoryConfig, BCC: BlockCacheConfig, B: block::Block<MC, M>, M: state_b
                     &mut self.status,
                     &mut self.reveal_request,
                     &mut hooks,
+                    unwrap_bound(step_bounds),
                 ))
             })
             .steps;
@@ -469,6 +472,7 @@ pub(crate) fn handle_system_call<MC, BCC, B, M>(
     status: &mut Cell<PvmStatus, M>,
     reveal_request: &mut RevealRequest<M>,
     hooks: impl PvmHooks,
+    max_steps: usize,
 ) -> bool
 where
     MC: MemoryConfig,
@@ -477,7 +481,7 @@ where
     M: state_backend::ManagerReadWrite,
 {
     system_state.handle_system_call(machine, hooks, |core| {
-        tezos::handle_tezos(core, status, reveal_request);
+        tezos::handle_tezos(core, status, reveal_request, max_steps);
         status.read() == PvmStatus::Evaluating
     })
 }
@@ -529,6 +533,7 @@ mod tests {
                 &mut self.status,
                 &mut self.reveal_request,
                 hooks,
+                1, // we only except a single step to handle the exception
             )
         }
     }
