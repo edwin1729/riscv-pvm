@@ -86,9 +86,9 @@ impl SignedOperation {
     }
 }
 
-pub fn batch_verify(txs: &[SignedOperation]) -> bool {
+pub fn parallel_batch_verify(txs: &[SignedOperation]) -> Vec<bool> {
     #[cfg(not(target_arch = "riscv64"))]
-    return txs.par_iter().map(|x| x.verify()).all(|x| x);
+    return txs.par_iter().map(|x| x.verify()).collect();
 
     #[cfg(target_arch = "riscv64")]
     return sbi::batch_verify(txs);

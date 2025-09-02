@@ -30,7 +30,7 @@ use tezos_smart_rollup::prelude::Runtime;
 use tezos_smart_rollup::prelude::*;
 use tezos_smart_rollup::types::Message;
 #[cfg(feature = "parallel-verify")]
-use utils::crypto::batch_verify;
+use utils::crypto::parallel_batch_verify;
 use utils::crypto::SignedOperation;
 use utils::data_interface::LogType;
 
@@ -115,6 +115,15 @@ fn get_inbox_message(
     })
 }
 
+pub fn batch_verify(txs: &[SignedOperation]) -> Vec<bool> {
+    // sequential verification
+    #[cfg(all(not(feature = "parallel-verify"), not(feature = "no-verify")))]
+    return txs.iter().map(|x| x.verify()).collect();
+
+    #[cfg(feature = "parallel-verify")]
+    parallel_batch_verify(txs)
+}
+
 #[entrypoint::main]
 #[cfg_attr(
     feature = "static-inbox",
@@ -139,26 +148,22 @@ pub fn entry(host: &mut impl Runtime) {
     // Verify the all signatures of transaction in the batch
     // Then execute all transactions
     let mut process_txs = |txs: &[SignedOperation]| {
-        // verification through sequential system call
-        #[cfg(all(not(feature = "parallel-verify"), not(feature = "no-verify")))]
-        assert!(txs.iter().map(|x| x.verify()).all(|x| x));
-        // batch signature verification using a parallel system call
-        #[cfg(feature = "parallel-verify")]
-        assert!(batch_verify(txs));
-
-        for signed_op in txs {
-            let tx = signed_op.inner.0.clone();
-            match evm.transact_commit(tx.clone()) {
-                Ok(res) => {
-                    let log = handle_res(res);
-                    if let Ok(ser) = serde_json::to_string(&log) {
-                        debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
+        let foo = batch_verify(txs);
+        for (signed_op, verified) in txs.iter().zip(foo) {
+            if verified {
+                let tx = signed_op.inner.0.clone();
+                match evm.transact_commit(tx.clone()) {
+                    Ok(res) => {
+                        let log = handle_res(res);
+                        if let Ok(ser) = serde_json::to_string(&log) {
+                            debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
+                        }
                     }
-                }
-                Err(err) => {
-                    let err = LogType::Error(format!("Unsuccessful transaction: \n{:?}", err));
-                    if let Ok(ser) = serde_json::to_string(&err) {
-                        debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
+                    Err(err) => {
+                        let err = LogType::Error(format!("Unsuccessful transaction: \n{:?}", err));
+                        if let Ok(ser) = serde_json::to_string(&err) {
+                            debug_msg!(wrapped_host.lock().unwrap(), "{}\n", ser);
+                        }
                     }
                 }
             }
